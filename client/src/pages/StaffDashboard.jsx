@@ -1,448 +1,363 @@
-import React, { useState, useEffect } from 'react';
-import api from '../api/axios';
-import { useSocket } from '../context/SocketContext';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
+import api from '../api/axios';
+import { 
+  Building2, Users, Calendar as CalendarIcon, Settings, LogOut, 
+  Clock, Activity, ChevronRight, CheckCircle, XCircle, AlertTriangle, Play, FastForward
+} from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import StatusBadge from '../components/StatusBadge';
 
-const StaffDashboard = () => {
+const THEMES = {
+  Telecom: { main: 'bg-blue-900', accent: 'bg-blue-600', light: 'bg-blue-50', text: 'text-blue-600', hover: 'hover:bg-blue-50', border: 'border-blue-200' },
+  Bank: { main: 'bg-green-900', accent: 'bg-green-600', light: 'bg-green-50', text: 'text-green-600', hover: 'hover:bg-green-50', border: 'border-green-200' },
+  Hospital: { main: 'bg-rose-900', accent: 'bg-rose-600', light: 'bg-rose-50', text: 'text-rose-600', hover: 'hover:bg-rose-50', border: 'border-rose-200' },
+  Other: { main: 'bg-purple-900', accent: 'bg-purple-600', light: 'bg-purple-50', text: 'text-purple-600', hover: 'hover:bg-purple-50', border: 'border-purple-200' }
+};
+
+export default function StaffDashboard() {
   const { user, logout } = useAuth();
   const socket = useSocket();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('live');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Data State
   const [queue, setQueue] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  const [serving, setServing] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [services, setServices] = useState([]);
 
-  // Dynamic Theme Mapping
-  const themes = {
-    Telecom: { main: '#1E3A8A', dim: '#DBEAFE', text: '#1E40AF', badge: 'Telecom' },
-    Bank: { main: '#14532D', dim: '#DCFCE7', text: '#166534', badge: 'Bank' },
-    Hospital: { main: '#881337', dim: '#FFE4E6', text: '#9F1239', badge: 'Hospital' },
-    Other: { main: '#4C1D95', dim: '#EDE9FE', text: '#5B21B6', badge: 'Other' }
-  };
+  const centerType = user?.staffCenter?.type || 'Other';
+  const theme = THEMES[centerType] || THEMES.Other;
+  const isHospital = centerType === 'Hospital';
 
-  const currentTheme = themes[user.staffCenter?.type] || themes.Other;
-
-  useEffect(() => {
-    if (!user.staffCenterId) {
-      setLoading(false);
-      return;
-    }
-
-    fetchData();
-    
-    socket?.emit('join:center', user.staffCenterId);
-    socket?.on('queue:update', fetchData);
-    socket?.on('queue:called', fetchData);
-
-    return () => {
-      socket?.emit('leave:center', user.staffCenterId);
-      socket?.off('queue:update', fetchData);
-      socket?.off('queue:called', fetchData);
-    };
-  }, [user.staffCenterId, socket]);
-
+  // Fetch Data
   const fetchData = async () => {
     try {
-      const [queueRes, apptRes, servRes] = await Promise.all([
-        api.get(`/queue/staff/service`), 
-        api.get(`/queue/staff/appointments`),
-        api.get(`/centers/${user.staffCenterId}`)
+      const [queueRes, apptRes, centerRes] = await Promise.all([
+        api.get('/queue/staff/service'),
+        api.get('/queue/staff/appointments'),
+        api.get(`/centers/${user?.staffCenterId || ''}`)
       ]);
       setQueue(queueRes.data);
-      setAppointments(apptRes.data || []);
-      setServices(servRes.data?.services || []);
-      
-      const called = queueRes.data.find(t => t.status === 'CALLED' && t.servedBy === user.id);
-      if (called) setServing(called);
+      setAppointments(apptRes.data);
+      setServices(centerRes.data?.services || []);
     } catch (err) {
-      console.error('Data fetch error:', err);
+      setError('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCallNext = async (serviceId) => {
-    try {
-      const { data } = await api.post('/queue/staff/call-next', { serviceId });
-      setServing(data);
-      fetchData();
-    } catch (err) {
-      alert(err.response?.data?.error || 'No waiting tickets');
-    }
-  };
+  useEffect(() => {
+    fetchData();
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-  const handleAction = async (ticketId, action) => {
+  useEffect(() => {
+    if (!socket || !user?.staffCenterId) return;
+    
+    // Listen for queue updates on all services in this center
+    services.forEach(s => socket.emit('join:service', s.id));
+    socket.emit('join:center', user.staffCenterId);
+
+    const handleUpdate = () => fetchData(); // Refresh on update
+    socket.on('queue:update', handleUpdate);
+    socket.on('appointment:new', handleUpdate);
+
+    return () => {
+      socket.off('queue:update', handleUpdate);
+      socket.off('appointment:new', handleUpdate);
+    };
+  }, [socket, user, services]);
+
+  // Actions
+  const handleAction = async (action, id, payload = {}) => {
     try {
-      await api.post(`/queue/staff/${ticketId}/${action}`);
-      if (action === 'serve' || action === 'skip') setServing(null);
+      if (action === 'callNext') {
+        await api.post('/queue/staff/call-next', { serviceId: id });
+      } else if (['serve', 'skip', 'no-show'].includes(action)) {
+        await api.patch(`/queue/staff/${id}/${action}`);
+      } else if (action === 'appt-status') {
+        await api.patch(`/queue/staff/appointments/${id}/status`, { status: payload.status });
+      }
       fetchData();
     } catch (err) {
-      alert(`Failed to ${action} ticket`);
+      alert(err.response?.data?.error || `Action ${action} failed`);
     }
   };
 
   if (loading) return <LoadingSpinner fullPage />;
 
+  // Derived Stats
+  const currentlyServing = queue.find(t => t.status === 'CALLED');
+  const waitingTotal = queue.filter(t => t.status === 'WAITING').length;
+  const todayAppts = appointments.filter(a => a.scheduledDate === new Date().toISOString().split('T')[0]);
+
   return (
-    <div className="staff-layout" style={{ '--theme-main': currentTheme.main, '--theme-dim': currentTheme.dim, '--theme-text': currentTheme.text }}>
-      {/* Dynamic Header */}
-      <header className="staff-header">
-        <div className="header-brand">
-          <div className="center-badge">{currentTheme.badge}</div>
-          <div className="center-info">
-            <h1 className="center-name">{user.staffCenter?.name}</h1>
-            <span className="center-type">{user.staffCenter?.type} Service Administration</span>
+    <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
+      
+      {/* SIDEBAR */}
+      <aside className={`w-64 ${theme.main} text-white flex flex-col transition-all duration-300 z-20`}>
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-8">
+            <Building2 className="w-8 h-8 text-white/80" />
+            <div>
+              <h1 className="font-bold tracking-wide">{user?.staffCenter?.name || 'Center'}</h1>
+              <p className="text-xs text-white/60 uppercase tracking-widest">{centerType}</p>
+            </div>
           </div>
+
+          <nav className="space-y-2">
+            {[
+              { id: 'live', icon: Activity, label: 'Live Queue' },
+              { id: 'appointments', icon: CalendarIcon, label: 'Appointments' },
+              { id: 'services', icon: Settings, label: 'Services Config' },
+            ].map(item => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                  activeTab === item.id 
+                    ? 'bg-white/20 font-medium text-white shadow-sm' 
+                    : 'text-white/60 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <item.icon className="w-5 h-5" />
+                {item.label}
+              </button>
+            ))}
+          </nav>
         </div>
-        <div className="header-actions">
-          <div className="user-box" onClick={logout}>
-            <span className="user-name">{user.name}</span>
-            <i className="ti ti-logout"></i>
+
+        <div className="mt-auto p-6 border-t border-white/10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">
+              {user?.name?.charAt(0)}
+            </div>
+            <div>
+              <p className="font-medium text-sm">{user?.name}</p>
+              <p className="text-xs text-white/60">Staff Admin</p>
+            </div>
           </div>
-        </div>
-      </header>
-
-      <div className="staff-container">
-        {/* Navigation Tabs */}
-        <div className="staff-tabs">
-          <button className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-            <i className="ti ti-layout-dashboard"></i> Overview
-          </button>
-          <button className={`tab-btn ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => setActiveTab('queue')}>
-            <i className="ti ti-users"></i> Live Queue
-          </button>
-          <button className={`tab-btn ${activeTab === 'appointments' ? 'active' : ''}`} onClick={() => setActiveTab('appointments')}>
-            <i className="ti ti-calendar-event"></i> Appointments
-          </button>
-          <button className={`tab-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => setActiveTab('services')}>
-            <i className="ti ti-category"></i> Services
+          <button onClick={logout} className="flex items-center gap-2 text-sm text-red-300 hover:text-red-200 transition-colors">
+            <LogOut className="w-4 h-4" /> Sign Out
           </button>
         </div>
+      </aside>
 
-        <main className="staff-content">
-          {activeTab === 'overview' && (
-            <div className="grid-overview">
-              <div className="stat-box">
-                <span className="stat-label">Active Queue</span>
-                <span className="stat-value">{queue.filter(t => t.status === 'WAITING').length}</span>
-              </div>
-              <div className="stat-box">
-                <span className="stat-label">Today's Appointments</span>
-                <span className="stat-value">{appointments.length}</span>
-              </div>
-              <div className="stat-box">
-                <span className="stat-label">Completed Today</span>
-                <span className="stat-value">{queue.filter(t => t.status === 'SERVED').length}</span>
-              </div>
-              <div className="stat-box">
-                <span className="stat-label">Service Channels</span>
-                <span className="stat-value">{services.length}</span>
-              </div>
-              
-              <div className="serving-hero card">
-                <div className="hero-label">CURRENTLY SERVING</div>
-                {serving ? (
-                  <div className="hero-body">
-                    <div className="hero-number">{serving.ticketNumber}</div>
-                    <div className="hero-customer">{serving.userName || serving.user?.name}</div>
-                    <div className="hero-service">{serving.service?.name}</div>
-                    <div className="hero-actions">
-                      <button className="btn btn-ghost" onClick={() => handleAction(serving.id, 'skip')}>Skip No-Show</button>
-                      <button className="btn btn-success" onClick={() => handleAction(serving.id, 'serve')}>Mark Complete</button>
-                    </div>
+      {/* MAIN CONTENT */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        
+        {/* HEADER */}
+        <header className="bg-white border-b border-slate-200 px-8 py-5 flex justify-between items-center z-10 shadow-sm">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800 capitalize">{activeTab.replace('-', ' ')}</h2>
+            <p className="text-slate-500 text-sm">Manage your center's workflow</p>
+          </div>
+          <div className="flex items-center gap-6">
+            <div className="bg-slate-100 px-4 py-2 rounded-lg flex items-center gap-2 text-slate-700 font-medium border border-slate-200">
+              <Clock className="w-4 h-4 text-slate-400" />
+              {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </div>
+          </div>
+        </header>
+
+        {/* CONTENT AREA */}
+        <div className="flex-1 overflow-auto p-8">
+          
+          {/* Currently Serving Hero Panel */}
+          {activeTab === 'live' && (
+            <div className={`mb-8 p-6 rounded-2xl shadow-sm border ${theme.border} ${theme.light} flex items-center justify-between`}>
+              <div>
+                <p className={`text-sm font-bold uppercase tracking-wider ${theme.text} mb-1`}>Currently Serving</p>
+                {currentlyServing ? (
+                  <div className="flex items-baseline gap-4">
+                    <h3 className="text-4xl font-black text-slate-900">{currentlyServing.ticketNumber}</h3>
+                    <span className="text-lg text-slate-600">{currentlyServing.customerName || currentlyServing.userName || 'Walk-in'}</span>
                   </div>
                 ) : (
-                  <div className="hero-empty">
-                    <p>System idle. Call the next customer from a service channel.</p>
-                  </div>
+                  <h3 className="text-3xl font-medium text-slate-400">Ready for next customer</h3>
                 )}
               </div>
+              
+              {currentlyServing && (
+                <div className="flex gap-3">
+                  <button onClick={() => handleAction('serve', currentlyServing.id)} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" /> Mark Complete
+                  </button>
+                  <button onClick={() => handleAction('no-show', currentlyServing.id)} className="px-4 py-3 bg-white text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50">
+                    No Show
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {activeTab === 'queue' && (
-            <div className="queue-grid">
+          {/* TAB CONTENT: LIVE QUEUE (SWIMLANES) */}
+          {activeTab === 'live' && (
+            <div className="flex gap-6 overflow-x-auto pb-4 h-[calc(100vh-280px)]">
               {services.map(service => {
-                const waiting = queue.filter(t => t.serviceId === service.id && t.status === 'WAITING');
+                const serviceQueue = queue.filter(t => t.serviceId === service.id && t.status === 'WAITING');
+                
                 return (
-                  <div key={service.id} className="service-channel card">
-                    <div className="channel-header">
+                  <div key={service.id} className="min-w-[340px] max-w-[340px] flex flex-col bg-slate-100 rounded-2xl p-4 border border-slate-200 h-full">
+                    <div className="flex justify-between items-center mb-4 px-2">
                       <div>
-                        <h3>{service.name}</h3>
-                        <span className="waiting-count">{waiting.length} waiting</span>
+                        <h4 className="font-bold text-slate-800">{service.name}</h4>
+                        <span className="text-xs font-medium text-slate-500">{serviceQueue.length} Waiting • ~{serviceQueue.length * service.avgDurationMin}m</span>
                       </div>
                       <button 
-                        className="btn btn-primary btn-sm" 
-                        disabled={waiting.length === 0 || !!serving}
-                        onClick={() => handleCallNext(service.id)}
+                        onClick={() => handleAction('callNext', service.id)}
+                        disabled={serviceQueue.length === 0}
+                        className={`p-2 rounded-xl text-white transition-all ${serviceQueue.length > 0 ? `${theme.accent} hover:opacity-90 shadow-md` : 'bg-slate-300 cursor-not-allowed'}`}
                       >
-                        Call Next
+                        <Play className="w-5 h-5 ml-0.5" />
                       </button>
                     </div>
-                    <div className="channel-list">
-                      {waiting.map(t => (
-                        <div key={t.id} className="queue-item">
-                          <span className="t-num">{t.ticketNumber}</span>
-                          <span className="t-name">{t.userName || t.user?.name}</span>
-                          <span className="t-time">{new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                      ))}
-                      {waiting.length === 0 && <p className="empty-text">No one waiting</p>}
+
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
+                      {serviceQueue.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 text-sm">Queue is empty</div>
+                      ) : (
+                        serviceQueue.map((ticket, idx) => (
+                          <div key={ticket.id} className={`bg-white p-4 rounded-xl shadow-sm border ${ticket.isPriority ? 'border-red-300 bg-red-50/30' : 'border-slate-100'}`}>
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="font-bold text-lg text-slate-800">{ticket.ticketNumber}</span>
+                              {isHospital && ticket.isPriority && (
+                                <span className="text-xs font-bold px-2 py-1 bg-red-100 text-red-700 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" /> Emergency
+                                </span>
+                              )}
+                              {(!isHospital || !ticket.isPriority) && (
+                                <span className="text-xs font-medium text-slate-400">#{idx + 1}</span>
+                              )}
+                            </div>
+                            <p className="text-sm text-slate-600 mb-3">{ticket.customerName || ticket.userName || 'Walk-in Customer'}</p>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400 flex items-center gap-1"><Clock className="w-3 h-3" /> Wait: {Math.round((new Date() - new Date(ticket.createdAt)) / 60000)}m</span>
+                              <div className="flex gap-2">
+                                <button onClick={() => handleAction('skip', ticket.id)} className="text-xs text-amber-600 hover:text-amber-700 font-medium px-2 py-1 bg-amber-50 rounded">Skip</button>
+                                <button onClick={() => handleAction('no-show', ticket.id)} className="text-xs text-slate-500 hover:text-slate-700 font-medium px-2 py-1 bg-slate-100 rounded">Drop</button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
-                );
+                )
               })}
             </div>
           )}
 
+          {/* TAB CONTENT: APPOINTMENTS */}
           {activeTab === 'appointments' && (
-            <div className="card appointment-card">
-               <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Customer</th>
-                    <th>Service Category</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {appointments.length > 0 ? appointments.map(appt => (
-                    <tr key={appt.id}>
-                      <td className="mono">{new Date(appt.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                      <td>{appt.user?.name}</td>
-                      <td>{appt.service?.name}</td>
-                      <td><StatusBadge status={appt.status} /></td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button className="btn-icon" title="Approve"><i className="ti ti-check"></i></button>
-                          <button className="btn-icon" title="Cancel"><i className="ti ti-x"></i></button>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr><td colSpan="5" className="empty-row">No appointments scheduled for today.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-          
-          {activeTab === 'services' && (
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
-                <h3>Service Configuration</h3>
-                <button className="btn btn-primary btn-sm">+ Add Service</button>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                <h3 className="font-bold text-lg text-slate-800">Manage Appointments</h3>
+                <div className="flex gap-4">
+                  <div className="px-4 py-2 bg-slate-50 rounded-lg text-sm border border-slate-200"><span className="font-bold text-slate-700">{todayAppts.length}</span> Today</div>
+                  <div className="px-4 py-2 bg-slate-50 rounded-lg text-sm border border-slate-200"><span className="font-bold text-slate-700">{appointments.length}</span> Total</div>
+                </div>
               </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Service Name</th>
-                    <th>Avg. Duration</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {services.map(s => (
-                    <tr key={s.id}>
-                      <td style={{ fontWeight: 600 }}>{s.name}</td>
-                      <td>{s.avgDurationMin} minutes</td>
-                      <td><span className="badge-active">Active</span></td>
-                      <td>
-                         <div style={{ display: 'flex', gap: '8px' }}>
-                          <button className="btn-icon"><i className="ti ti-edit"></i></button>
-                          <button className="btn-icon" style={{ color: '#ef4444' }}><i className="ti ti-trash"></i></button>
-                        </div>
-                      </td>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs uppercase tracking-wider">
+                      <th className="p-4 font-semibold">Ref & Service</th>
+                      <th className="p-4 font-semibold">Customer</th>
+                      <th className="p-4 font-semibold">Schedule</th>
+                      <th className="p-4 font-semibold">Status</th>
+                      <th className="p-4 font-semibold text-right">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {appointments.length === 0 ? (
+                      <tr><td colSpan="5" className="p-8 text-center text-slate-400">No appointments booked</td></tr>
+                    ) : (
+                      appointments.map(appt => (
+                        <tr key={appt.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-4">
+                            <p className="font-bold text-slate-800">{appt.referenceNumber}</p>
+                            <p className="text-xs text-slate-500">{appt.service?.name}</p>
+                          </td>
+                          <td className="p-4">
+                            <p className="font-medium text-slate-700">{appt.customerName}</p>
+                            <p className="text-xs text-slate-500">{appt.phone}</p>
+                          </td>
+                          <td className="p-4">
+                            <p className="font-medium text-slate-700 flex items-center gap-1"><CalendarIcon className="w-3 h-3 text-slate-400"/> {appt.scheduledDate}</p>
+                            <p className="text-xs text-slate-500 flex items-center gap-1 mt-1"><Clock className="w-3 h-3 text-slate-400"/> {appt.scheduledTime}</p>
+                          </td>
+                          <td className="p-4">
+                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
+                              appt.status === 'PENDING' ? 'bg-amber-100 text-amber-700' :
+                              appt.status === 'CONFIRMED' ? 'bg-indigo-100 text-indigo-700' :
+                              appt.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {appt.status}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right space-x-2">
+                            {appt.status === 'PENDING' && (
+                              <>
+                                <button onClick={() => handleAction('appt-status', appt.id, {status: 'CONFIRMED'})} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 font-medium text-xs rounded hover:bg-indigo-100">Confirm</button>
+                                <button onClick={() => handleAction('appt-status', appt.id, {status: 'CANCELLED'})} className="px-3 py-1.5 bg-red-50 text-red-700 font-medium text-xs rounded hover:bg-red-100">Reject</button>
+                              </>
+                            )}
+                            {appt.status === 'CONFIRMED' && (
+                              <button onClick={() => handleAction('appt-status', appt.id, {status: 'COMPLETED'})} className="px-3 py-1.5 bg-green-50 text-green-700 font-medium text-xs rounded hover:bg-green-100">Complete</button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
-        </main>
-      </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
-        .staff-layout {
-          min-height: 100vh;
-          background: #f8fafc;
-          color: #1e293b;
-          display: flex;
-          flex-direction: column;
-        }
+          {/* TAB CONTENT: SERVICES CONFIG */}
+          {activeTab === 'services' && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="font-bold text-lg text-slate-800">Service Configuration</h3>
+                <p className="text-sm text-slate-500 mt-1">Manage wait time intelligence and service settings.</p>
+              </div>
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {services.map(service => (
+                  <div key={service.id} className="border border-slate-200 rounded-xl p-5 hover:border-indigo-200 transition-colors">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h4 className="font-bold text-slate-800 text-lg">{service.name}</h4>
+                        <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded mt-1">PREFIX: {service.codePrefix}</span>
+                      </div>
+                      <div className={`w-3 h-3 rounded-full ${service.isActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Avg Duration (Mins)</label>
+                        <input type="number" defaultValue={service.avgDurationMin} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      </div>
+                      <button className="w-full py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
+                        Save Settings
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-        /* Header */
-        .staff-header {
-          height: 80px;
-          background: var(--theme-main);
-          color: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 40px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        .header-brand {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-        .center-badge {
-          background: rgba(255,255,255,0.2);
-          padding: 4px 12px;
-          border-radius: 6px;
-          font-size: 11px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          border: 1px solid rgba(255,255,255,0.3);
-        }
-        .center-name {
-          font-size: 18px;
-          font-weight: 700;
-          margin: 0;
-          line-height: 1.2;
-        }
-        .center-type {
-          font-size: 12px;
-          opacity: 0.8;
-          font-weight: 500;
-        }
-        .user-box {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          cursor: pointer;
-          background: rgba(0,0,0,0.1);
-          padding: 8px 16px;
-          border-radius: 8px;
-          transition: all 0.2s;
-        }
-        .user-box:hover { background: rgba(0,0,0,0.2); }
-        .user-name { font-weight: 600; font-size: 14px; }
-
-        .staff-container {
-          padding: 40px;
-          max-width: 1400px;
-          margin: 0 auto;
-          width: 100%;
-          display: flex;
-          flex-direction: column;
-          gap: 32px;
-        }
-
-        /* Tabs */
-        .staff-tabs {
-          display: flex;
-          gap: 8px;
-          background: #fff;
-          padding: 8px;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          width: fit-content;
-        }
-        .tab-btn {
-          padding: 10px 20px;
-          border-radius: 8px;
-          border: none;
-          background: transparent;
-          color: #64748b;
-          font-weight: 600;
-          font-size: 14px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.2s;
-        }
-        .tab-btn:hover { background: #f1f5f9; }
-        .tab-btn.active {
-          background: var(--theme-dim);
-          color: var(--theme-text);
-        }
-
-        /* Overview Grid */
-        .grid-overview {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 24px;
-        }
-        .stat-box {
-          background: #fff;
-          padding: 24px;
-          border-radius: 16px;
-          border: 1px solid #e2e8f0;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .stat-label { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; }
-        .stat-value { font-size: 28px; font-weight: 800; color: #0f172a; }
-
-        .serving-hero {
-          grid-column: span 4;
-          padding: 48px !important;
-          text-align: center;
-          background: #fff;
-          border: 2px solid var(--theme-main) !important;
-        }
-        .hero-label { font-size: 14px; font-weight: 800; color: var(--theme-text); letter-spacing: 1px; }
-        .hero-number { font-size: 64px; font-weight: 900; color: var(--theme-text); margin: 16px 0; font-family: var(--font-mono); }
-        .hero-customer { font-size: 20px; font-weight: 700; color: #0f172a; }
-        .hero-service { font-size: 14px; color: #64748b; margin-top: 4px; }
-        .hero-actions { display: flex; justify-content: center; gap: 16px; margin-top: 32px; }
-        .hero-empty { padding: 40px; color: #94a3b8; font-style: italic; }
-
-        /* Queue Grid */
-        .queue-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-          gap: 24px;
-        }
-        .service-channel { padding: 0 !important; overflow: hidden; }
-        .channel-header {
-          padding: 20px 24px;
-          background: #f8fafc;
-          border-bottom: 1px solid #e2e8f0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .channel-header h3 { font-size: 16px; font-weight: 700; margin: 0; }
-        .waiting-count { font-size: 12px; color: #64748b; font-weight: 500; }
-        .channel-list { padding: 16px 24px; min-height: 200px; max-height: 400px; overflow-y: auto; }
-        .queue-item {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 12px 0;
-          border-bottom: 1px solid #f1f5f9;
-        }
-        .t-num { font-weight: 800; color: var(--theme-text); font-family: var(--font-mono); width: 60px; }
-        .t-name { font-size: 14px; font-weight: 500; flex: 1; }
-        .t-time { font-size: 11px; color: #94a3b8; }
-        .empty-text { text-align: center; color: #94a3b8; margin-top: 60px; font-size: 14px; }
-
-        /* Tables */
-        .data-table { width: 100%; border-collapse: collapse; }
-        .data-table th { text-align: left; padding: 16px; font-size: 12px; font-weight: 700; color: #64748b; border-bottom: 1px solid #e2e8f0; }
-        .data-table td { padding: 16px; font-size: 14px; border-bottom: 1px solid #f1f5f9; }
-        .empty-row { text-align: center; padding: 60px !important; color: #94a3b8; font-style: italic; }
-        .btn-icon { background: none; border: none; cursor: pointer; color: #64748b; font-size: 18px; transition: color 0.2s; }
-        .btn-icon:hover { color: var(--theme-main); }
-        .badge-active { background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
-
-        .btn-success { background: #10b981; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; }
-        .btn-success:hover { background: #059669; }
-      `}} />
+        </div>
+      </main>
     </div>
   );
-};
-
-export default StaffDashboard;
+}

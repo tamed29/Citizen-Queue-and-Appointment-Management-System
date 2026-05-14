@@ -4,15 +4,38 @@ const prisma = new PrismaClient();
 
 export const getCenters = async (req, res) => {
   try {
+    const { type } = req.query;
+    
+    const whereClause = { isActive: true };
+    if (type) {
+      whereClause.type = type; // SQLite doesn't support mode: 'insensitive'
+    }
+
     const centers = await prisma.serviceCenter.findMany({
-      where: { isActive: true },
+      where: whereClause,
       include: {
         services: {
           where: { isActive: true },
+          orderBy: { displayOrder: 'asc' },
           include: { counters: true },
         },
       },
     });
+    
+    // Add logic to calculate estimated wait times for centers based on queue
+    for (const center of centers) {
+      let totalWait = 0;
+      let serviceCount = 0;
+      for (const service of center.services) {
+        const waitingCount = await prisma.queueTicket.count({
+          where: { serviceId: service.id, status: 'WAITING' }
+        });
+        totalWait += (waitingCount * service.avgDurationMin);
+        serviceCount++;
+      }
+      center.estimatedWaitMinutes = serviceCount > 0 ? Math.round(totalWait / serviceCount) : 0;
+    }
+
     res.json(centers);
   } catch (error) {
     console.error('Get Centers Error:', error);

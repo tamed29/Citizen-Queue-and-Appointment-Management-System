@@ -14,7 +14,8 @@ import MyTickets from './pages/MyTickets';
 import BookAppointment from './pages/BookAppointment';
 import TrackQueue from './pages/TrackQueue';
 import StaffDashboard from './pages/StaffDashboard';
-import SuperAdminPanel from './pages/SuperAdminPanel'; // New
+import SuperAdminPanel from './pages/SuperAdminPanel';
+import PublicBooking from './pages/PublicBooking'; // New
 import LoadingSpinner from './components/LoadingSpinner';
 
 function AppRoutes() {
@@ -57,6 +58,7 @@ function AppRoutes() {
       {/* CITIZEN ROUTES — admin roles excluded, they have dedicated dashboards */}
       <Route element={<ProtectedRoute allowedRoles={['CITIZEN']} />}>
         <Route path="/home" element={<Home />} />
+        <Route path="/book" element={<PublicBooking />} />
         <Route path="/queue/track" element={<TrackQueue />} />
         <Route path="/queue/take" element={<TakeQueue />} />
         <Route path="/tickets" element={<MyTickets />} />

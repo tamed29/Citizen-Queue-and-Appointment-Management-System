@@ -25,26 +25,34 @@ model User {
 }
 
 model ServiceCenter {
-  id        String    @id @default(uuid())
-  name      String
-  type      String    // Telecom, Bank, Hospital, Other
-  location  String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  services  Service[]
-  staff     User[]    @relation("StaffCenter")
+  id                  String    @id @default(uuid())
+  name                String
+  type                String    // Telecom, Bank, Hospital, Other
+  location            String?
+  workingHoursStart   String    @default("08:00")
+  workingHoursEnd     String    @default("17:00")
+  workingDays         String    @default("Mon,Tue,Wed,Thu,Fri")
+  maxQueuePerService  Int       @default(100)
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  services            Service[]
+  staff               User[]    @relation("StaffCenter")
 }
 
 model Service {
   id             String        @id @default(uuid())
   name           String
+  codePrefix     String?       // SIM, LOAN, LAB
+  description    String?
   avgDurationMin Int           @default(10)
+  displayOrder   Int           @default(0)
   isActive       Boolean       @default(true)
   centerId       String
   center         ServiceCenter @relation(fields: [centerId], references: [id])
   counters       Counter[]
   tickets        QueueTicket[]
   appointments   Appointment[]
+  timeSlots      TimeSlot[]
 }
 
 model Counter {
@@ -59,13 +67,17 @@ model Counter {
 model QueueTicket {
   id           String       @id @default(uuid())
   ticketNumber String
+  customerName String?      // For walk-ins without accounts
+  phone        String?
+  idNumber     String?
   status       String       @default("WAITING")
   isPriority   Boolean      @default(false)
+  position     Int          @default(0)
   createdAt    DateTime     @default(now())
   calledAt     DateTime?
   servedAt     DateTime?
-  userId       String
-  user         User         @relation(fields: [userId], references: [id])
+  userId       String?      // Optional
+  user         User?        @relation(fields: [userId], references: [id])
   serviceId    String
   service      Service      @relation(fields: [serviceId], references: [id])
   counterId    String?
@@ -73,12 +85,33 @@ model QueueTicket {
 }
 
 model Appointment {
-  id          String            @id @default(uuid())
-  scheduledAt DateTime
-  status      String            @default("PENDING")
-  createdAt   DateTime          @default(now())
-  userId      String
-  user         User         @relation(fields: [userId], references: [id])
+  id                String    @id @default(uuid())
+  referenceNumber   String    @unique
+  customerName      String?
+  phone             String?
+  idNumber          String?
+  scheduledDate     String    // YYYY-MM-DD
+  scheduledTime     String    // HH:MM
+  notes             String?
+  status            String    @default("PENDING") // PENDING, CONFIRMED, COMPLETED, CANCELLED, RESCHEDULED, NO_SHOW
+  createdAt         DateTime  @default(now())
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id])
+  serviceId         String
+  service           Service   @relation(fields: [serviceId], references: [id])
+  confirmedByStaffId String?
+}
+
+model TimeSlot {
+  id          String   @id @default(uuid())
+  date        String   // YYYY-MM-DD
+  startTime   String   // HH:MM
+  endTime     String   // HH:MM
+  maxCapacity Int      @default(1)
+  bookedCount Int      @default(0)
+  isBlocked   Boolean  @default(false)
   serviceId   String
-  service      Service           @relation(fields: [serviceId], references: [id])
+  service     Service  @relation(fields: [serviceId], references: [id])
+
+  @@unique([serviceId, date, startTime])
 }

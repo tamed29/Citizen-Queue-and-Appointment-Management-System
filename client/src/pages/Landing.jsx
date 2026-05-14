@@ -79,8 +79,8 @@ const Landing = () => {
         </p>
         
         <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <Link to="/register" className="btn btn-primary" style={{ padding: '14px 32px', fontSize: '16px' }}>Get Started — It's Free</Link>
-          <Link to="/login" className="btn btn-ghost" style={{ padding: '14px 32px', fontSize: '16px', border: '1px solid var(--border)' }}>Sign In to Account</Link>
+          <Link to="/book" className="btn btn-primary" style={{ padding: '14px 32px', fontSize: '16px' }}>Book Appointment or Queue</Link>
+          <Link to="/login" className="btn btn-ghost" style={{ padding: '14px 32px', fontSize: '16px', border: '1px solid var(--border)' }}>Staff Login</Link>
         </div>
 
         <div style={{ marginTop: '32px', display: 'flex', justifyContent: 'center', gap: '24px', opacity: 0.6 }}>

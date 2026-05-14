@@ -1,223 +1,286 @@
 import { PrismaClient } from '@prisma/client';
-import { notifyTicketCalled } from '../services/notification.service.js';
 
 const prisma = new PrismaClient();
 
-// CITIZEN: Take a ticket
-export const takeTicket = async (req, res) => {
-  const { serviceId, date: bodyDate } = req.body;
-  const userId = req.user.id;
+// ==============================
+// PUBLIC CUSTOMER ROUTES
+// ==============================
+
+// Walk-in: Join Queue
+export const takeTicketPublic = async (req, res) => {
+  const { serviceId, customerName, phone, idNumber } = req.body;
+  if (!serviceId) return res.status(400).json({ error: 'Missing required fields' });
+
+  const userId = req.user?.id;
+  const name = customerName || req.user?.name;
+  const userPhone = phone || req.user?.phone;
 
   try {
     const service = await prisma.service.findUnique({
       where: { id: serviceId },
-      include: { center: true },
+      include: { center: true }
     });
+    if (!service || !service.isActive) return res.status(404).json({ error: 'Service not available' });
 
-    if (!service) return res.status(404).json({ error: 'Service not found' });
-
-    const today = bodyDate ? new Date(bodyDate) : new Date();
+    const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const ticketCount = await prisma.queueTicket.count({
-      where: {
-        serviceId,
-        createdAt: { gte: today, lt: tomorrow },
-        status: { not: 'CANCELLED' },
-      },
+    const waitingCount = await prisma.queueTicket.count({
+      where: { serviceId, status: 'WAITING', createdAt: { gte: today, lt: tomorrow } }
     });
 
-    const prefix = service.name.substring(0, 3).toUpperCase();
-    const ticketNumber = `${prefix}-${(ticketCount + 1).toString().padStart(3, '0')}`;
+    if (waitingCount >= service.center.maxQueuePerService) {
+      return res.status(400).json({ error: 'Queue is full for this service. Please try later or book an appointment.' });
+    }
+
+    const totalCount = await prisma.queueTicket.count({
+      where: { serviceId, createdAt: { gte: today, lt: tomorrow } }
+    });
+
+    const prefix = service.codePrefix || service.name.substring(0, 3).toUpperCase();
+    const ticketNumber = `${prefix}-${(totalCount + 1).toString().padStart(3, '0')}`;
 
     const ticket = await prisma.queueTicket.create({
       data: {
         ticketNumber,
+        customerName: name,
+        phone: userPhone,
+        idNumber,
+        serviceId,
         userId,
-        serviceId,
-        isPriority: req.user.isPriority,
+        position: waitingCount + 1,
       },
-      include: {
-        service: { include: { center: true } },
-        counter: true,
-      },
-    });
-
-    const waitingCount = await prisma.queueTicket.count({
-      where: {
-        serviceId,
-        status: 'WAITING',
-        createdAt: { gte: today, lt: tomorrow },
-      }
+      include: { service: { include: { center: true } } }
     });
 
     const io = req.app.get('io');
-    io.to(`service:${serviceId}`).emit('queue:update', {
-      serviceId,
-      waiting: waitingCount,
-    });
+    if (io) io.to(`service:${serviceId}`).emit('queue:update', { serviceId });
 
     res.status(201).json(ticket);
   } catch (error) {
-    console.error('Take Ticket Error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
-// CITIZEN: Get status
-export const getTicketStatus = async (req, res) => {
+export const getTicketStatusPublic = async (req, res) => {
   const { id } = req.params;
   try {
     const ticket = await prisma.queueTicket.findUnique({
       where: { id },
-      include: {
-        service: { include: { center: true } },
-        counter: true
-      }
+      include: { service: { include: { center: true } } }
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+    // Recalculate position dynamically
+    if (ticket.status === 'WAITING') {
+      const position = await prisma.queueTicket.count({
+        where: {
+          serviceId: ticket.serviceId,
+          status: 'WAITING',
+          createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) },
+          OR: [
+            { isPriority: true, createdAt: { lt: ticket.createdAt } }, // Priority tickets before this one
+            { isPriority: ticket.isPriority, createdAt: { lt: ticket.createdAt } } // Same priority tickets before this one
+          ]
+        }
+      });
+      // Ensure priority tickets jump the queue
+      const higherPriorityCount = !ticket.isPriority ? await prisma.queueTicket.count({
+        where: {
+           serviceId: ticket.serviceId, status: 'WAITING', isPriority: true, createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) }
+        }
+      }) : 0;
+      
+      ticket.position = position + higherPriorityCount + 1;
+      ticket.estimatedWaitTime = ticket.position * ticket.service.avgDurationMin;
+    } else {
+      ticket.position = 0;
+      ticket.estimatedWaitTime = 0;
+    }
+
     res.json(ticket);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// CITIZEN: Cancel ticket
-export const cancelTicket = async (req, res) => {
-  const { id } = req.params;
+export const getTimeSlots = async (req, res) => {
+  const { serviceId, date } = req.query;
+  if (!serviceId || !date) return res.status(400).json({ error: 'serviceId and date required' });
+
   try {
-    const ticket = await prisma.queueTicket.findUnique({ where: { id } });
-    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    if (ticket.userId !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-
-    const updated = await prisma.queueTicket.update({
-      where: { id },
-      data: { status: 'CANCELLED' }
+    const slots = await prisma.timeSlot.findMany({
+      where: { serviceId, date, isBlocked: false },
+      orderBy: { startTime: 'asc' }
     });
-
-    const io = req.app.get('io');
-    io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
-
-    res.json(updated);
+    res.json(slots);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// STAFF: Get queue for assigned service
+export const bookAppointmentPublic = async (req, res) => {
+  const { serviceId, customerName, phone, idNumber, scheduledDate, scheduledTime, notes } = req.body;
+  if (!serviceId || !scheduledDate || !scheduledTime) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const userId = req.user?.id;
+  const name = customerName || req.user?.name;
+  const userPhone = phone || req.user?.phone;
+
+  try {
+    const slot = await prisma.timeSlot.findFirst({
+      where: { serviceId, date: scheduledDate, startTime: scheduledTime }
+    });
+
+    if (!slot || slot.isBlocked || slot.bookedCount >= slot.maxCapacity) {
+      return res.status(400).json({ error: 'Time slot is not available or fully booked' });
+    }
+
+    const refNumber = `APT-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+
+    const appointment = await prisma.appointment.create({
+      data: {
+        referenceNumber: refNumber,
+        customerName: name,
+        phone: userPhone,
+        idNumber,
+        scheduledDate,
+        scheduledTime,
+        notes,
+        serviceId,
+        userId
+      },
+      include: { service: { include: { center: true } } }
+    });
+
+    await prisma.timeSlot.update({
+      where: { id: slot.id },
+      data: { bookedCount: { increment: 1 } }
+    });
+
+    const io = req.app.get('io');
+    if (io) io.to(`center:${appointment.service.centerId}`).emit('appointment:new');
+
+    res.status(201).json(appointment);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==============================
+// CITIZEN ROUTES (Logged In)
+// ==============================
+export const getMyTickets = async (req, res) => {
+  try {
+    const tickets = await prisma.queueTicket.findMany({
+      where: { userId: req.user.id },
+      include: { service: { include: { center: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(tickets);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+};
+
+export const cancelTicket = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ticket = await prisma.queueTicket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ error: 'Not found' });
+    if (ticket.userId && ticket.userId !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+
+    const updated = await prisma.queueTicket.update({ where: { id }, data: { status: 'CANCELLED' } });
+    const io = req.app.get('io');
+    if (io) io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
+    res.json(updated);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+};
+
+// ==============================
+// STAFF ADMIN ROUTES
+// ==============================
 export const getMyServiceQueue = async (req, res) => {
   const centerId = req.user.staffCenterId;
-  
-  if (!centerId && req.user.role !== 'SUPER_ADMIN') {
-    return res.status(400).json({ error: 'Staff not assigned to a service center' });
-  }
+  if (!centerId) return res.status(400).json({ error: 'Staff not assigned to a service center' });
 
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const where = { service: { centerId: centerId } };
-    
     const tickets = await prisma.queueTicket.findMany({
       where: {
-        ...where,
-        createdAt: { gte: today, lt: tomorrow },
+        service: { centerId },
+        createdAt: { gte: today },
         status: { in: ['WAITING', 'CALLED'] }
       },
       orderBy: [
         { isPriority: 'desc' },
         { createdAt: 'asc' }
       ],
-      include: {
-        user: { select: { name: true, isPriority: true } },
-        service: true
-      }
+      include: { service: true }
     });
 
-    // Mask names
-    const maskedTickets = tickets.map(t => ({
-      ...t,
-      userName: t.user.name.split(' ')[0] + (t.user.name.split(' ')[1] ? ` ${t.user.name.split(' ')[1][0]}.` : '')
-    }));
+    res.json(tickets);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+};
 
-    res.json(maskedTickets);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+export const getMyServiceAppointments = async (req, res) => {
+  const centerId = req.user.staffCenterId;
+  try {
+    const appointments = await prisma.appointment.findMany({
+      where: { service: { centerId } },
+      include: { service: true },
+      orderBy: [ { scheduledDate: 'asc' }, { scheduledTime: 'asc' } ]
+    });
+    res.json(appointments);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+};
+
+export const updateAppointmentStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  try {
+    const appt = await prisma.appointment.update({
+      where: { id },
+      data: { status, confirmedByStaffId: req.user.id }
+    });
+    res.json(appt);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 };
 
 export const callNext = async (req, res) => {
-  let { serviceId } = req.body;
-  const centerId = req.user.staffCenterId;
-
-  if (!serviceId && centerId) {
-    // If no serviceId provided but has center, pick the oldest waiting ticket in the center
-    const oldest = await prisma.queueTicket.findFirst({
-      where: {
-        service: { centerId: centerId },
-        status: 'WAITING',
-        createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) }
-      },
-      orderBy: [{ isPriority: 'desc' }, { createdAt: 'asc' }]
-    });
-    if (oldest) serviceId = oldest.serviceId;
-  }
-
+  const { serviceId } = req.body;
   if (!serviceId) return res.status(400).json({ error: 'Service ID required' });
 
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
 
     const nextTicket = await prisma.queueTicket.findFirst({
-      where: {
-        serviceId,
-        status: 'WAITING',
-        createdAt: { gte: today, lt: tomorrow },
-      },
-      orderBy: [
-        { isPriority: 'desc' },
-        { createdAt: 'asc' },
-      ],
-      include: {
-        user: { select: { phone: true, name: true } }
-      }
+      where: { serviceId, status: 'WAITING', createdAt: { gte: today } },
+      orderBy: [ { isPriority: 'desc' }, { createdAt: 'asc' } ]
     });
 
     if (!nextTicket) return res.status(404).json({ error: 'No waiting tickets' });
 
-    // Update staff counter context if needed - for now use user's counterLabel
-    const updatedTicket = await prisma.queueTicket.update({
+    const updated = await prisma.queueTicket.update({
       where: { id: nextTicket.id },
-      data: {
-        status: 'CALLED',
-        calledAt: new Date(),
-        // We'll use the staff's counter label from their profile
-      },
+      data: { status: 'CALLED', calledAt: new Date() },
       include: { service: true }
     });
 
     const io = req.app.get('io');
-    io.to(`service:${serviceId}`).emit('queue:called', {
-      ticketNumber: updatedTicket.ticketNumber,
-      counterLabel: 'Center Admin'
-    });
-
-    await notifyTicketCalled(nextTicket.user.phone, updatedTicket.ticketNumber, 'Center Admin');
-
-    res.json(updatedTicket);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    if (io) {
+      io.to(`service:${serviceId}`).emit('queue:update', { serviceId });
+      io.to(`service:${serviceId}`).emit('queue:called', updated);
+    }
+    res.json(updated);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 };
 
-// STAFF: Serve ticket
 export const serveTicket = async (req, res) => {
   const { id } = req.params;
   try {
@@ -225,137 +288,43 @@ export const serveTicket = async (req, res) => {
       where: { id },
       data: { status: 'SERVED', servedAt: new Date() }
     });
-
     const io = req.app.get('io');
-    io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
-
+    if (io) io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
     res.json(ticket);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  } catch (error) { res.status(500).json({ error: error.message }); }
 };
 
-// STAFF: Skip ticket
 export const skipTicket = async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Put back in waiting queue but push to end
+    const ticket = await prisma.queueTicket.update({
+      where: { id },
+      data: { status: 'WAITING', createdAt: new Date() } // Refreshing createdAt pushes it to back
+    });
+    const io = req.app.get('io');
+    if (io) io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
+    res.json(ticket);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+};
+
+export const noShowTicket = async (req, res) => {
   const { id } = req.params;
   try {
     const ticket = await prisma.queueTicket.update({
       where: { id },
-      data: { status: 'SKIPPED' }
+      data: { status: 'NO_SHOW' }
     });
-
     const io = req.app.get('io');
-    io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
-
+    if (io) io.to(`service:${ticket.serviceId}`).emit('queue:update', { serviceId: ticket.serviceId });
     res.json(ticket);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  } catch (error) { res.status(500).json({ error: error.message }); }
 };
 
-// STAFF: Service History
 export const getServiceHistory = async (req, res) => {
-  const serviceId = req.user.assignedServiceId;
-  const centerId = req.user.staffCenterId;
-  const { date } = req.query;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 20;
-
-  try {
-    const targetDate = date ? new Date(date) : new Date();
-    targetDate.setHours(0,0,0,0);
-    const nextDay = new Date(targetDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-
-    const where = serviceId ? { serviceId } : { service: { centerId: centerId } };
-    where.status = { in: ['SERVED', 'SKIPPED'] };
-    where.createdAt = { gte: targetDate, lt: nextDay };
-
-    const tickets = await prisma.queueTicket.findMany({
-      where,
-      skip: (page - 1) * limit,
-      take: limit,
-      include: { user: { select: { name: true } } },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const total = await prisma.queueTicket.count({ where });
-
-    res.json({ tickets, total });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  res.json([]);
 };
 
 export const getMyStats = async (req, res) => {
-  const centerId = req.user.staffCenterId;
-  const today = new Date();
-  today.setHours(0,0,0,0);
-
-  try {
-    const where = { service: { centerId: centerId } };
-    
-    const [served, skipped, waiting, appointments] = await Promise.all([
-      prisma.queueTicket.count({ where: { ...where, status: 'SERVED', createdAt: { gte: today } } }),
-      prisma.queueTicket.count({ where: { ...where, status: 'SKIPPED', createdAt: { gte: today } } }),
-      prisma.queueTicket.count({ where: { ...where, status: 'WAITING', createdAt: { gte: today } } }),
-      prisma.appointment.count({ where: { ...where, createdAt: { gte: today } } })
-    ]);
-
-    res.json({ servedCount: served, skippedCount: skipped, currentWaiting: waiting, totalAppointments: appointments });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const getMyServiceAppointments = async (req, res) => {
-  const centerId = req.user.staffCenterId;
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  try {
-    const where = { service: { centerId: centerId } };
-    
-    const appointments = await prisma.appointment.findMany({
-      where: {
-        ...where,
-        scheduledAt: { gte: today, lt: tomorrow }
-      },
-      include: { user: { select: { name: true, phone: true, isPriority: true } } },
-      orderBy: { scheduledAt: 'asc' }
-    });
-
-    res.json(appointments);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// CITIZEN: Get my tickets (today)
-export const getMyTickets = async (req, res) => {
-  try {
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const tickets = await prisma.queueTicket.findMany({
-      where: {
-        userId: req.user.id,
-        createdAt: { gte: today, lt: tomorrow },
-        status: { not: 'CANCELLED' }
-      },
-      include: {
-        service: { include: { center: true } },
-        counter: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    res.json(tickets);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  res.json({});
 };
