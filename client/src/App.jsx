@@ -8,56 +8,59 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Home from './pages/Home';
 import Login from './pages/Login';
-import AdminLogin from './pages/AdminLogin';
 import Register from './pages/Register';
 import TakeQueue from './pages/TakeQueue';
 import MyTickets from './pages/MyTickets';
 import BookAppointment from './pages/BookAppointment';
 import TrackQueue from './pages/TrackQueue';
 import StaffDashboard from './pages/StaffDashboard';
-import AdminPanel from './pages/AdminPanel';
+import SuperAdminPanel from './pages/SuperAdminPanel'; // New
 import LoadingSpinner from './components/LoadingSpinner';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
 
-  if (loading) return <LoadingSpinner />;
+  if (loading) return <LoadingSpinner fullPage />;
 
   return (
     <Routes>
-      {/* Public Routes */}
-      <Route path="/" element={user ? <Navigate to="/home" replace /> : <Landing />} />
-      <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
-      <Route path="/admin" element={
-        user ? (
-          (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') ? <AdminPanel /> : 
-          user.role === 'STAFF' ? <Navigate to="/staff" replace /> : <Navigate to="/home" replace />
-        ) : <AdminLogin />
+      {/* Public Routes — redirect logged-in users to their correct dashboard */}
+      <Route path="/" element={
+        !user ? <Landing /> :
+        user.role === 'SUPER_ADMIN' ? <Navigate to="/super-admin/dashboard" replace /> :
+        user.role === 'STAFF_ADMIN' ? <Navigate to="/staff/dashboard" replace /> :
+        <Navigate to="/home" replace />
       } />
-      <Route path="/admin/login" element={user ? <Navigate to="/home" replace /> : <AdminLogin />} />
+      <Route path="/login" element={
+        !user ? <Login /> :
+        user.role === 'SUPER_ADMIN' ? <Navigate to="/super-admin/dashboard" replace /> :
+        user.role === 'STAFF_ADMIN' ? <Navigate to="/staff/dashboard" replace /> :
+        <Navigate to="/home" replace />
+      } />
       <Route path="/register" element={user ? <Navigate to="/home" replace /> : <Register />} />
 
-      {/* Authenticated routes */}
-      <Route element={<ProtectedRoute allowedRoles={['CITIZEN', 'STAFF', 'ADMIN', 'SUPER_ADMIN']} />}>
-        <Route path="/home" element={<Home />} />
-        <Route path="/queue/track" element={<TrackQueue />} />
+      {/* SUPER ADMIN ROUTES */}
+      <Route element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']} />}>
+        <Route path="/super-admin" element={<Navigate to="/super-admin/dashboard" replace />} />
+        <Route path="/super-admin/dashboard" element={<SuperAdminPanel activeTab="dashboard" />} />
+        <Route path="/super-admin/staff" element={<SuperAdminPanel activeTab="staff" />} />
+        <Route path="/super-admin/reports" element={<SuperAdminPanel activeTab="reports" />} />
+        <Route path="/super-admin/settings" element={<SuperAdminPanel activeTab="settings" />} />
       </Route>
 
-      {/* Citizen & Admin Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['CITIZEN', 'ADMIN', 'SUPER_ADMIN']} />}>
+      {/* STAFF ADMIN ROUTES */}
+      <Route element={<ProtectedRoute allowedRoles={['STAFF_ADMIN']} />}>
+        <Route path="/staff" element={<Navigate to="/staff/dashboard" replace />} />
+        <Route path="/staff/dashboard" element={<StaffDashboard />} />
+      </Route>
+
+      {/* CITIZEN ROUTES — admin roles excluded, they have dedicated dashboards */}
+      <Route element={<ProtectedRoute allowedRoles={['CITIZEN']} />}>
+        <Route path="/home" element={<Home />} />
+        <Route path="/queue/track" element={<TrackQueue />} />
         <Route path="/queue/take" element={<TakeQueue />} />
         <Route path="/tickets" element={<MyTickets />} />
         <Route path="/appointments" element={<BookAppointment />} />
-      </Route>
-
-      {/* Staff & Admin Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['STAFF', 'ADMIN', 'SUPER_ADMIN']} />}>
-        <Route path="/staff" element={<StaffDashboard />} />
-      </Route>
-
-      {/* Admin Only Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'SUPER_ADMIN']} />}>
-        {/* /admin is handled above for cleaner admin-first login flow */}
       </Route>
 
       {/* Fallback */}

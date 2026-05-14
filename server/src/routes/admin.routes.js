@@ -4,7 +4,7 @@ import {
   getUsers, 
   updateUserRole, 
   togglePriority,
-  createStaffAccount,
+  createStaffRebuild,
   getAllStaff,
   getStaffById,
   updateStaff,
@@ -23,14 +23,14 @@ const router = Router();
 router.get('/stats', getStats);
 
 // Protected admin routes
-router.use(authenticate, requireRole('ADMIN', 'SUPER_ADMIN'));
+router.use(authenticate, requireRole('SUPER_ADMIN'));
 
 router.get('/users', getUsers);
 router.patch('/users/:id/role', updateUserRole);
 router.patch('/users/:id/priority', togglePriority);
 
 // Staff management
-router.post('/staff/create', createStaffAccount);
+router.post('/staff/rebuild', createStaffRebuild);
 router.get('/staff', getAllStaff);
 router.get('/staff/:id', getStaffById);
 router.patch('/staff/:id', updateStaff);

@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// Existing dashboard stats
+// ─── Dashboard Stats ────────────────────────────────────────────────────────
+
 export const getStats = async (req, res) => {
   try {
     const today = new Date();
@@ -17,9 +18,8 @@ export const getStats = async (req, res) => {
       waitingTickets,
       servedTicketsData,
       ticketsByService,
-      hourlyVolume,
       totalStaff,
-      activeStaff
+      totalCenters
     ] = await Promise.all([
       prisma.queueTicket.count({ where: { createdAt: { gte: today, lt: tomorrow } } }),
       prisma.queueTicket.count({ where: { status: 'SERVED', createdAt: { gte: today, lt: tomorrow } } }),
@@ -37,27 +37,13 @@ export const getStats = async (req, res) => {
           name: true,
           _count: {
             select: {
-              tickets: {
-                where: { createdAt: { gte: today, lt: tomorrow } }
-              }
+              tickets: { where: { createdAt: { gte: today, lt: tomorrow } } }
             }
           }
         }
       }),
-      prisma.$queryRaw`
-        SELECT strftime('%H', createdAt) as hour, count(*) as count
-        FROM QueueTicket
-        WHERE createdAt >= ${today.toISOString()} AND createdAt < ${tomorrow.toISOString()}
-        GROUP BY hour
-        ORDER BY hour
-      `,
-      prisma.user.count({ where: { role: 'STAFF' } }),
-      prisma.user.count({ 
-        where: { 
-          role: 'STAFF', 
-          lastLoginAt: { gte: today } 
-        } 
-      })
+      prisma.user.count({ where: { role: 'STAFF_ADMIN' } }),
+      prisma.serviceCenter.count()
     ]);
 
     let avgWaitTime = 0;
@@ -68,20 +54,14 @@ export const getStats = async (req, res) => {
       avgWaitTime = Math.round(totalWait / servedTicketsData.length / 60000);
     }
 
-    const formattedHourly = Array.from({ length: 24 }, (_, i) => {
-      const match = hourlyVolume.find(h => parseInt(h.hour) === i);
-      return { hour: i, count: match ? match.count : 0 };
-    });
-
     res.json({
       totalTickets,
       servedTickets,
       waitingTickets,
       avgWaitTime,
       totalStaff,
-      activeStaff,
-      ticketsByService: ticketsByService.map(s => ({ name: s.name, count: s._count.tickets })),
-      hourlyVolume: formattedHourly
+      totalCenters,
+      ticketsByService: ticketsByService.map(s => ({ name: s.name, count: s._count.tickets }))
     });
   } catch (error) {
     console.error('Get Stats Error:', error);
@@ -89,7 +69,8 @@ export const getStats = async (req, res) => {
   }
 };
 
-// Citizen management
+// ─── Citizen Management ─────────────────────────────────────────────────────
+
 export const getUsers = async (req, res) => {
   const { search } = req.query;
   const page = parseInt(req.query.page) || 1;
@@ -120,17 +101,13 @@ export const getUsers = async (req, res) => {
         isPriority: true,
         createdAt: true,
         _count: {
-          select: {
-            tickets: true,
-            appointments: true
-          }
+          select: { tickets: true, appointments: true }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
 
     const total = await prisma.user.count({ where });
-
     res.json({ users, total, pages: Math.ceil(total / limit) });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -167,50 +144,46 @@ export const togglePriority = async (req, res) => {
   }
 };
 
-// Staff Management
-export const createStaffAccount = async (req, res) => {
-  const { name, phone, email, password, staffCenterId, assignedServiceId, counterLabel, role } = req.body;
+// ─── Staff Admin Management ─────────────────────────────────────────────────
 
-  const targetRole = role === 'ADMIN' ? 'ADMIN' : 'STAFF';
+export const createStaffRebuild = async (req, res) => {
+  const { name, email, password, centerType, centerName } = req.body;
 
-  if (!name || !phone || !password || !email) {
+  if (!name || !email || !password || !centerType || !centerName) {
     return res.status(400).json({ error: 'All fields are required' });
-  }
-  
-  if (targetRole === 'STAFF' || targetRole === 'ADMIN') {
-    if (!staffCenterId) {
-      return res.status(400).json({ error: 'Please select a service center for this administrator.' });
-    }
   }
 
   try {
-    const existing = await prisma.user.findUnique({ where: { phone } });
-    if (existing) return res.status(409).json({ error: 'Phone number already taken' });
+    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const shortCode = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '.');
-
-    const staff = await prisma.user.create({
+    // Create the Service Center
+    const center = await prisma.serviceCenter.create({
       data: {
-        username: shortCode,
-        name,
-        phone,
-        email: email.toLowerCase(),
-        passwordHash,
-        role: targetRole,
-        staffCenterId,
-        assignedServiceId,
-        counterLabel,
-        isActive: true
-      },
-      select: {
-        id: true, username: true, name: true, phone: true, email: true, role: true, 
-        staffCenterId: true, assignedServiceId: true, counterLabel: true, isActive: true
+        name: centerName,
+        type: centerType,
+        location: 'Arba Minch'
       }
     });
 
-    res.status(201).json(staff);
+    // Create the Staff Admin account
+    const passwordHash = await bcrypt.hash(password, 10);
+    const staff = await prisma.user.create({
+      data: {
+        name,
+        email: email.toLowerCase(),
+        passwordHash,
+        role: 'STAFF_ADMIN',
+        staffCenterId: center.id,
+        isActive: true
+      },
+      include: { staffCenter: true }
+    });
+
+    const { passwordHash: _, ...staffSafe } = staff;
+    res.status(201).json(staffSafe);
   } catch (error) {
+    console.error('Staff Rebuild Error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -218,26 +191,13 @@ export const createStaffAccount = async (req, res) => {
 export const getAllStaff = async (req, res) => {
   try {
     const staff = await prisma.user.findMany({
-      where: { role: { in: ['STAFF', 'ADMIN'] } },
-      include: {
-        staffCenter: { select: { name: true, type: true } },
-      },
-      orderBy: [
-        { staffCenter: { name: 'asc' } },
-        { name: 'asc' }
-      ]
+      where: { role: 'STAFF_ADMIN' },
+      include: { staffCenter: true },
+      orderBy: { createdAt: 'desc' }
     });
-
-    // Manually include service name since it's just a String ID in schema for now
-    const staffWithService = await Promise.all(staff.map(async (s) => {
-      const service = await prisma.service.findUnique({
-        where: { id: s.assignedServiceId },
-        select: { name: true }
-      });
-      return { ...s, assignedService: service };
-    }));
-
-    res.json(staffWithService);
+    // Strip password hashes
+    const safe = staff.map(({ passwordHash, ...s }) => s);
+    res.json(safe);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -248,29 +208,25 @@ export const getStaffById = async (req, res) => {
   try {
     const staff = await prisma.user.findUnique({
       where: { id },
-      include: {
-        staffCenter: true
-      }
+      include: { staffCenter: { include: { services: true } } }
     });
 
     if (!staff) return res.status(404).json({ error: 'Staff not found' });
 
-    const service = await prisma.service.findUnique({
-      where: { id: staff.assignedServiceId }
-    });
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Count tickets served today across the whole center
     const servedToday = await prisma.queueTicket.count({
       where: {
-        counter: { label: staff.counterLabel }, // Approx logic for history
+        service: { centerId: staff.staffCenterId },
         status: 'SERVED',
         servedAt: { gte: today }
       }
     });
 
-    res.json({ ...staff, assignedService: service, servedToday });
+    const { passwordHash, ...staffSafe } = staff;
+    res.json({ ...staffSafe, servedToday });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -278,13 +234,41 @@ export const getStaffById = async (req, res) => {
 
 export const updateStaff = async (req, res) => {
   const { id } = req.params;
-  const { name, phone, email, staffCenterId, assignedServiceId, counterLabel } = req.body;
+  const { name, email, centerType, centerName, password } = req.body;
   try {
-    const updated = await prisma.user.update({
+    const staff = await prisma.user.findUnique({ where: { id } });
+    if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+    let updateData = { name, email: email?.toLowerCase() };
+    
+    if (password && password.trim().length > 0) {
+      updateData.passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    // Update staff user
+    const updatedUser = await prisma.user.update({
       where: { id },
-      data: { name, phone, email, staffCenterId, assignedServiceId, counterLabel },
+      data: updateData
     });
-    res.json(updated);
+
+    // Update associated service center if fields are provided
+    if (centerType || centerName) {
+      await prisma.serviceCenter.update({
+        where: { id: staff.staffCenterId },
+        data: {
+          ...(centerName && { name: centerName }),
+          ...(centerType && { type: centerType })
+        }
+      });
+    }
+
+    const updated = await prisma.user.findUnique({
+      where: { id },
+      include: { staffCenter: true }
+    });
+
+    const { passwordHash, ...safe } = updated;
+    res.json(safe);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -293,12 +277,12 @@ export const updateStaff = async (req, res) => {
 export const resetStaffPassword = async (req, res) => {
   const { id } = req.params;
   const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
   try {
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({
-      where: { id },
-      data: { passwordHash }
-    });
+    await prisma.user.update({ where: { id }, data: { passwordHash } });
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -309,11 +293,12 @@ export const toggleStaffActive = async (req, res) => {
   const { id } = req.params;
   try {
     const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
     const updated = await prisma.user.update({
       where: { id },
       data: { isActive: !user.isActive }
     });
-    res.json(updated);
+    res.json({ isActive: updated.isActive });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -322,23 +307,26 @@ export const toggleStaffActive = async (req, res) => {
 export const deleteStaff = async (req, res) => {
   const { id } = req.params;
   try {
-    const servedCount = await prisma.queueTicket.count({
-      where: { counter: { label: { contains: id } } } // Placeholder check
+    // Check if they have served any tickets
+    const ticketCount = await prisma.queueTicket.count({
+      where: { service: { centerId: (await prisma.user.findUnique({ where: { id }, select: { staffCenterId: true } }))?.staffCenterId } }
     });
 
-    if (servedCount > 0) {
+    if (ticketCount > 0) {
+      // Soft-delete: deactivate instead
       await prisma.user.update({ where: { id }, data: { isActive: false } });
-      return res.json({ message: 'Staff deactivated (cannot delete due to history)' });
+      return res.json({ message: 'Account deactivated (has historical records)' });
     }
 
     await prisma.user.delete({ where: { id } });
-    res.json({ message: 'Staff deleted successfully' });
+    res.json({ message: 'Staff account deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Monitoring
+// ─── Live Monitoring ────────────────────────────────────────────────────────
+
 export const getLiveCenterQueue = async (req, res) => {
   const { centerId } = req.params;
   try {
@@ -346,9 +334,9 @@ export const getLiveCenterQueue = async (req, res) => {
       where: { centerId },
       include: {
         tickets: {
-          where: { 
+          where: {
             status: { in: ['WAITING', 'CALLED'] },
-            createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) }
+            createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) }
           },
           include: { user: { select: { name: true } } },
           orderBy: [{ isPriority: 'desc' }, { createdAt: 'asc' }]
@@ -361,22 +349,24 @@ export const getLiveCenterQueue = async (req, res) => {
   }
 };
 
+// ─── Reports ────────────────────────────────────────────────────────────────
+
 export const getReports = async (req, res) => {
   const { centerId, serviceId, dateFrom, dateTo } = req.query;
   try {
     const where = {
       createdAt: {
-        gte: dateFrom ? new Date(dateFrom) : new Date(new Date().setHours(0,0,0,0)),
+        gte: dateFrom ? new Date(dateFrom) : new Date(new Date().setHours(0, 0, 0, 0)),
         lte: dateTo ? new Date(dateTo) : new Date()
       },
       ...(serviceId && { serviceId }),
       ...(centerId && { service: { centerId } })
     };
 
-    const [tickets, stats] = await Promise.all([
+    const [tickets, byStatus] = await Promise.all([
       prisma.queueTicket.findMany({
         where,
-        include: { service: true, user: true }
+        include: { service: { select: { name: true } } }
       }),
       prisma.queueTicket.groupBy({
         by: ['status'],
@@ -386,8 +376,8 @@ export const getReports = async (req, res) => {
     ]);
 
     const served = tickets.filter(t => t.status === 'SERVED');
-    const avgWait = served.length > 0 
-      ? served.reduce((acc, t) => acc + (new Date(t.calledAt) - new Date(t.createdAt)), 0) / served.length / 60000 
+    const avgWait = served.length > 0
+      ? served.reduce((acc, t) => acc + (new Date(t.calledAt) - new Date(t.createdAt)), 0) / served.length / 60000
       : 0;
 
     res.json({
@@ -396,7 +386,7 @@ export const getReports = async (req, res) => {
       cancelled: tickets.filter(t => t.status === 'CANCELLED').length,
       skipped: tickets.filter(t => t.status === 'SKIPPED').length,
       avgWaitMinutes: Math.round(avgWait),
-      // byService, byStaff, etc would go here
+      byStatus
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

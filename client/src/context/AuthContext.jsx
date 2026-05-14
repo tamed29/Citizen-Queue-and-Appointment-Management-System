@@ -22,14 +22,9 @@ export const AuthProvider = ({ children }) => {
     fetchMe();
   }, []);
 
-  const login = async (phone, password) => {
-    const { data } = await api.post('/auth/login', { phone, password });
-    setUser(data);
-    return data;
-  };
-
-  const adminLogin = async (email, password) => {
-    const { data } = await api.post('/auth/admin/login', { username: email, password });
+  const login = async (identifier, password) => {
+    // Unified login: identifier can be phone or email
+    const { data } = await api.post('/auth/login', { identifier, password });
     setUser(data);
     return data;
   };
@@ -41,12 +36,18 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    await api.post('/auth/logout');
-    setUser(null);
+    try {
+      await api.post('/auth/logout');
+    } catch (err) {
+      console.error('Logout failed', err);
+    } finally {
+      setUser(null);
+      window.location.href = '/login';
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, adminLogin, register, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

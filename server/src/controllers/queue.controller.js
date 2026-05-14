@@ -108,10 +108,11 @@ export const cancelTicket = async (req, res) => {
 
 // STAFF: Get queue for assigned service
 export const getMyServiceQueue = async (req, res) => {
-  const serviceId = req.user.assignedServiceId;
   const centerId = req.user.staffCenterId;
   
-  if (!serviceId && !centerId) return res.status(400).json({ error: 'Staff not assigned to a service or center' });
+  if (!centerId && req.user.role !== 'SUPER_ADMIN') {
+    return res.status(400).json({ error: 'Staff not assigned to a service center' });
+  }
 
   try {
     const today = new Date();
@@ -119,7 +120,7 @@ export const getMyServiceQueue = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const where = serviceId ? { serviceId } : { service: { staffCenterId: centerId } };
+    const where = { service: { centerId: centerId } };
     
     const tickets = await prisma.queueTicket.findMany({
       where: {
@@ -149,16 +150,15 @@ export const getMyServiceQueue = async (req, res) => {
   }
 };
 
-// STAFF: Call next ticket
 export const callNext = async (req, res) => {
-  let serviceId = req.user.assignedServiceId || req.body.serviceId;
+  let { serviceId } = req.body;
   const centerId = req.user.staffCenterId;
 
   if (!serviceId && centerId) {
     // If no serviceId provided but has center, pick the oldest waiting ticket in the center
     const oldest = await prisma.queueTicket.findFirst({
       where: {
-        service: { staffCenterId: centerId },
+        service: { centerId: centerId },
         status: 'WAITING',
         createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) }
       },
@@ -167,7 +167,7 @@ export const callNext = async (req, res) => {
     if (oldest) serviceId = oldest.serviceId;
   }
 
-  if (!serviceId) return res.status(400).json({ error: 'Service ID required or staff not assigned' });
+  if (!serviceId) return res.status(400).json({ error: 'Service ID required' });
 
   try {
     const today = new Date();
@@ -206,10 +206,10 @@ export const callNext = async (req, res) => {
     const io = req.app.get('io');
     io.to(`service:${serviceId}`).emit('queue:called', {
       ticketNumber: updatedTicket.ticketNumber,
-      counterLabel: req.user.counterLabel || 'Assigned Counter'
+      counterLabel: 'Center Admin'
     });
 
-    await notifyTicketCalled(nextTicket.user.phone, updatedTicket.ticketNumber, req.user.counterLabel || 'Assigned Counter');
+    await notifyTicketCalled(nextTicket.user.phone, updatedTicket.ticketNumber, 'Center Admin');
 
     res.json(updatedTicket);
   } catch (error) {
@@ -267,7 +267,7 @@ export const getServiceHistory = async (req, res) => {
     const nextDay = new Date(targetDate);
     nextDay.setDate(nextDay.getDate() + 1);
 
-    const where = serviceId ? { serviceId } : { service: { staffCenterId: centerId } };
+    const where = serviceId ? { serviceId } : { service: { centerId: centerId } };
     where.status = { in: ['SERVED', 'SKIPPED'] };
     where.createdAt = { gte: targetDate, lt: nextDay };
 
@@ -287,15 +287,13 @@ export const getServiceHistory = async (req, res) => {
   }
 };
 
-// STAFF: Stats
 export const getMyStats = async (req, res) => {
-  const serviceId = req.user.assignedServiceId;
   const centerId = req.user.staffCenterId;
   const today = new Date();
   today.setHours(0,0,0,0);
 
   try {
-    const where = serviceId ? { serviceId } : { service: { staffCenterId: centerId } };
+    const where = { service: { centerId: centerId } };
     
     const [served, skipped, waiting, appointments] = await Promise.all([
       prisma.queueTicket.count({ where: { ...where, status: 'SERVED', createdAt: { gte: today } } }),
@@ -310,9 +308,7 @@ export const getMyStats = async (req, res) => {
   }
 };
 
-// STAFF: Appointments
 export const getMyServiceAppointments = async (req, res) => {
-  const serviceId = req.user.assignedServiceId;
   const centerId = req.user.staffCenterId;
   const today = new Date();
   today.setHours(0,0,0,0);
@@ -320,7 +316,7 @@ export const getMyServiceAppointments = async (req, res) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    const where = serviceId ? { serviceId } : { service: { staffCenterId: centerId } };
+    const where = { service: { centerId: centerId } };
     
     const appointments = await prisma.appointment.findMany({
       where: {

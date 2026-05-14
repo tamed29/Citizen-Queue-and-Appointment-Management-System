@@ -23,9 +23,7 @@ export const authenticate = async (req, res, next) => {
         isPriority: true,
         isActive: true,
         staffCenterId: true,
-        staffCenter: { select: { id: true, name: true, type: true } },
-        assignedServiceId: true,
-        counterLabel: true
+        staffCenter: { select: { id: true, name: true, type: true } }
       },
     });
 
@@ -36,12 +34,6 @@ export const authenticate = async (req, res, next) => {
     if (!user.isActive) {
       return res.status(403).json({ error: 'Account disabled. Contact admin.' });
     }
-
-    // Update lastLoginAt to show recent activity
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() }
-    });
 
     req.user = user;
     next();

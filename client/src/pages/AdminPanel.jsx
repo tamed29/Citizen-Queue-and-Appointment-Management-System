@@ -424,10 +424,9 @@ const CreateStaffTab = ({ onCreated }) => {
   const { user } = useAuth();
   const [formData, setFormData] = useState({
     name: '', phone: '', email: '', password: '', 
-    staffCenterId: '', assignedServiceId: '', counterLabel: '', role: 'ADMIN'
+    staffCenterId: '', role: 'ADMIN'
   });
   const [centers, setCenters] = useState([]);
-  const [services, setServices] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -438,13 +437,6 @@ const CreateStaffTab = ({ onCreated }) => {
     };
     fetchCenters();
   }, []);
-
-  useEffect(() => {
-    if (formData.staffCenterId) {
-      const center = centers.find(c => c.id === formData.staffCenterId);
-      setServices(center?.services || []);
-    }
-  }, [formData.staffCenterId, centers]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -517,7 +509,7 @@ const CreateStaffTab = ({ onCreated }) => {
                 onChange={e => setFormData({...formData, password: e.target.value})} 
               />
             </div>
-            <div className="field">
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label className="label">Assigned Service Center</label>
               <select 
                 className="input" 
@@ -529,32 +521,6 @@ const CreateStaffTab = ({ onCreated }) => {
                 {centers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            {formData.staffCenterId && (
-              <>
-                <div className="field">
-                  <label className="label">Assigned Service Category</label>
-                  <select 
-                    className="input" 
-                    required 
-                    value={formData.assignedServiceId} 
-                    onChange={e => setFormData({...formData, assignedServiceId: e.target.value})}
-                  >
-                    <option value="">Select Service</option>
-                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div className="field">
-                  <label className="label">Counter/Desk Label</label>
-                  <input 
-                    className="input" 
-                    required 
-                    placeholder="e.g. Counter 1, Window A"
-                    value={formData.counterLabel} 
-                    onChange={e => setFormData({...formData, counterLabel: e.target.value})} 
-                  />
-                </div>
-              </>
-            )}
           </div>
         </div>
 

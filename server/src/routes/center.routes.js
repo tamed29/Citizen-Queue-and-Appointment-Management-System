@@ -13,8 +13,10 @@ const router = Router();
 
 router.get('/', getCenters);
 router.get('/:id', getCenterById);
-router.post('/', authenticate, requireRole('ADMIN'), createCenter);
-router.post('/:centerId/services', authenticate, requireRole('ADMIN'), createService);
-router.post('/services/:serviceId/counters', authenticate, requireRole('ADMIN'), createCounter);
+router.get('/:id/services', getCenterById); // To fetch services for the dashboard
+
+router.post('/', authenticate, requireRole('SUPER_ADMIN'), createCenter);
+router.post('/:centerId/services', authenticate, requireRole('SUPER_ADMIN', 'STAFF_ADMIN'), createService);
+router.post('/services/:serviceId/counters', authenticate, requireRole('SUPER_ADMIN', 'STAFF_ADMIN'), createCounter);
 
 export default router;

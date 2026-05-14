@@ -9,29 +9,26 @@ datasource db {
 
 model User {
   id                String         @id @default(uuid())
-  username          String?        @unique
   name              String
-  phone             String         @unique
   email             String?        @unique
+  phone             String?        @unique
   passwordHash      String
-  role              String         @default("CITIZEN")
+  role              String         @default("CITIZEN") // SUPER_ADMIN, STAFF_ADMIN, CITIZEN
   isPriority        Boolean        @default(false)
   isActive          Boolean        @default(true)
   lastLoginAt       DateTime?
-  counterLabel      String?
-  assignedServiceId String?
+  staffCenterId     String?
+  staffCenter       ServiceCenter? @relation("StaffCenter", fields: [staffCenterId], references: [id])
   createdAt         DateTime       @default(now())
   tickets           QueueTicket[]
   appointments      Appointment[]
-  staffCenterId     String?
-  staffCenter       ServiceCenter? @relation("StaffCenter", fields: [staffCenterId], references: [id])
 }
 
 model ServiceCenter {
   id        String    @id @default(uuid())
   name      String
-  location  String
-  type      String
+  type      String    // Telecom, Bank, Hospital, Other
+  location  String?
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   services  Service[]
