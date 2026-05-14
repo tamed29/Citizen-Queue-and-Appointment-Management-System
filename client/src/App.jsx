@@ -30,7 +30,7 @@ function AppRoutes() {
       <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
       <Route path="/admin" element={
         user ? (
-          user.role === 'ADMIN' ? <AdminPanel /> : 
+          (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') ? <AdminPanel /> : 
           user.role === 'STAFF' ? <Navigate to="/staff" replace /> : <Navigate to="/home" replace />
         ) : <AdminLogin />
       } />
@@ -38,25 +38,25 @@ function AppRoutes() {
       <Route path="/register" element={user ? <Navigate to="/home" replace /> : <Register />} />
 
       {/* Authenticated routes */}
-      <Route element={<ProtectedRoute allowedRoles={['CITIZEN', 'STAFF', 'ADMIN']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['CITIZEN', 'STAFF', 'ADMIN', 'SUPER_ADMIN']} />}>
         <Route path="/home" element={<Home />} />
         <Route path="/queue/track" element={<TrackQueue />} />
       </Route>
 
       {/* Citizen & Admin Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['CITIZEN', 'ADMIN']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['CITIZEN', 'ADMIN', 'SUPER_ADMIN']} />}>
         <Route path="/queue/take" element={<TakeQueue />} />
         <Route path="/tickets" element={<MyTickets />} />
         <Route path="/appointments" element={<BookAppointment />} />
       </Route>
 
       {/* Staff & Admin Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['STAFF', 'ADMIN', 'SUPER_ADMIN']} />}>
         <Route path="/staff" element={<StaffDashboard />} />
       </Route>
 
       {/* Admin Only Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'SUPER_ADMIN']} />}>
         {/* /admin is handled above for cleaner admin-first login flow */}
       </Route>
 

@@ -336,3 +336,30 @@ export const getMyServiceAppointments = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// CITIZEN: Get my tickets (today)
+export const getMyTickets = async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const tickets = await prisma.queueTicket.findMany({
+      where: {
+        userId: req.user.id,
+        createdAt: { gte: today, lt: tomorrow },
+        status: { not: 'CANCELLED' }
+      },
+      include: {
+        service: { include: { center: true } },
+        counter: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json(tickets);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};

@@ -23,7 +23,7 @@ const router = Router();
 router.get('/stats', getStats);
 
 // Protected admin routes
-router.use(authenticate, requireRole('ADMIN'));
+router.use(authenticate, requireRole('ADMIN', 'SUPER_ADMIN'));
 
 router.get('/users', getUsers);
 router.patch('/users/:id/role', updateUserRole);

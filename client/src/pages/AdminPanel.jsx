@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { 
@@ -7,6 +8,8 @@ import {
 } from 'recharts';
 
 const AdminPanel = () => {
+  const { user } = useAuth();
+  const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -43,23 +46,28 @@ const AdminPanel = () => {
   return (
     <div className="admin-layout">
       <aside className="admin-sidebar">
-        <div className="sidebar-header">OVERVIEW</div>
-        <SidebarItem id="dashboard" icon="ti-layout-dashboard" label="Dashboard" />
-        <SidebarItem id="live" icon="ti-broadcast" label="Live Queues" />
-        <SidebarItem id="reports" icon="ti-report-analytics" label="Reports" />
+        <div style={{ padding: '24px 20px 32px' }}>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--accent-2)', letterSpacing: '-0.5px' }}>CQAMS PANEL</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-3)', fontWeight: 600, marginTop: '4px' }}>VERSION 2.4.0</div>
+        </div>
 
-        <div className="sidebar-header">STAFF MANAGEMENT</div>
-        <SidebarItem id="all-staff" icon="ti-users" label="All Staff" />
-        <SidebarItem id="create-staff" icon="ti-user-plus" label="Create Staff Account" />
+        <div className="sidebar-header">INSIGHTS</div>
+        <SidebarItem id="dashboard" icon="ti-layout-grid" label="Overview" />
+        <SidebarItem id="live" icon="ti-activity-heartbeat" label="Real-time Monitor" />
+        <SidebarItem id="reports" icon="ti-chart-dots" label="Analytics" />
 
-        <div className="sidebar-header">SERVICE CENTERS</div>
+        <div className="sidebar-header">MANAGEMENT</div>
+        <SidebarItem id="all-staff" icon="ti-users" label="Personnel Directory" />
+        <SidebarItem id="create-staff" icon="ti-user-plus" label="Provision Account" />
+
+        <div className="sidebar-header">LOCATIONS</div>
         <SidebarItem id="center-cbe" icon="ti-building-bank" label="CBE Bank" />
         <SidebarItem id="center-telecom" icon="ti-device-mobile" label="Ethio Telecom" />
         <SidebarItem id="center-hospital" icon="ti-building-hospital" label="AM Hospital" />
 
-        <div className="sidebar-header">SYSTEM</div>
-        <SidebarItem id="citizens" icon="ti-users-group" label="Citizens" />
-        <SidebarItem id="settings" icon="ti-settings" label="Settings" />
+        <div className="sidebar-header">PREFERENCES</div>
+        <SidebarItem id="citizens" icon="ti-users-group" label="User Accounts" />
+        <SidebarItem id="settings" icon="ti-settings" label="System Settings" />
       </aside>
 
       <main className="admin-content">
@@ -274,9 +282,41 @@ const AllStaffTab = () => {
     fetchStaff();
   };
 
+  const deleteStaff = async (id) => {
+    if (window.confirm('Are you sure you want to delete this personnel member?')) {
+      await api.delete(`/admin/staff/${id}`);
+      fetchStaff();
+    }
+  };
+
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [editFormData, setEditFormData] = useState({ name: '', phone: '', email: '', role: '', staffCenterId: '' });
+
+  const startEdit = (s) => {
+    setEditingStaff(s);
+    setEditFormData({
+      name: s.name,
+      phone: s.phone,
+      email: s.email || '',
+      role: s.role,
+      staffCenterId: s.staffCenterId || ''
+    });
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    try {
+      await api.patch(`/admin/staff/${editingStaff.id}`, editFormData);
+      setEditingStaff(null);
+      fetchStaff();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Update failed');
+    }
+  };
+
   return (
     <div className="tab-content">
-      <h2 className="page-title" style={{ marginBottom: '24px' }}>Staff Members</h2>
+      <h2 className="page-title" style={{ marginBottom: '24px' }}>Personnel Members</h2>
       
       <div className="grid-3">
         {staff.map(s => (
@@ -309,16 +349,27 @@ const AllStaffTab = () => {
 
             <hr className="divider" style={{ marginBottom: '16px' }} />
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>{s.counterLabel || 'No Counter'}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ 
                   width: '8px', height: '8px', borderRadius: '50%', 
                   background: (s.lastLoginAt && (new Date() - new Date(s.lastLoginAt) < 1800000)) ? 'var(--success)' : 'var(--text-4)' 
                 }}></span>
+                <span style={{ fontSize: '11px', color: 'var(--text-3)', fontWeight: 500 }}>
+                  {(s.lastLoginAt && (new Date() - new Date(s.lastLoginAt) < 1800000)) ? 'ONLINE' : 'OFFLINE'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button className="btn btn-sm btn-ghost" onClick={() => startEdit(s)} style={{ fontSize: '11px', gap: '5px' }}>
+                  <i className="ti ti-edit" style={{ fontSize: '13px' }}></i> Edit
+                </button>
+                <button className="btn btn-sm btn-danger-dim" onClick={() => deleteStaff(s.id)} style={{ fontSize: '11px', gap: '5px', color: 'var(--danger)' }}>
+                  <i className="ti ti-trash" style={{ fontSize: '13px' }}></i> Delete
+                </button>
                 <button 
                   className={`btn btn-sm ${s.isActive ? 'btn-ghost' : 'btn-primary'}`}
                   onClick={() => toggleActive(s.id)}
+                  style={{ fontSize: '11px' }}
                 >
                   {s.isActive ? 'Disable' : 'Enable'}
                 </button>
@@ -327,14 +378,53 @@ const AllStaffTab = () => {
           </div>
         ))}
       </div>
+
+      {editingStaff && (
+        <div className="modal-overlay">
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '24px' }}>Edit Personnel</h2>
+            <form onSubmit={handleUpdate}>
+              <div className="field">
+                <label className="label">Full Name</label>
+                <input 
+                  type="text" className="input" required 
+                  value={editFormData.name} 
+                  onChange={e => setEditFormData({...editFormData, name: e.target.value})} 
+                />
+              </div>
+              <div className="field">
+                <label className="label">Phone</label>
+                <input 
+                  type="text" className="input" required 
+                  value={editFormData.phone} 
+                  onChange={e => setEditFormData({...editFormData, phone: e.target.value})} 
+                />
+              </div>
+              <div className="field">
+                <label className="label">Email</label>
+                <input 
+                  type="email" className="input" required 
+                  value={editFormData.email} 
+                  onChange={e => setEditFormData({...editFormData, email: e.target.value})} 
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
+                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditingStaff(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 const CreateStaffTab = ({ onCreated }) => {
+  const { user } = useAuth();
   const [formData, setFormData] = useState({
     name: '', phone: '', email: '', password: '', 
-    staffCenterId: '', serviceId: '', counterLabel: ''
+    staffCenterId: '', assignedServiceId: '', counterLabel: '', role: 'ADMIN'
   });
   const [centers, setCenters] = useState([]);
   const [services, setServices] = useState([]);
@@ -427,7 +517,7 @@ const CreateStaffTab = ({ onCreated }) => {
                 onChange={e => setFormData({...formData, password: e.target.value})} 
               />
             </div>
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <div className="field">
               <label className="label">Assigned Service Center</label>
               <select 
                 className="input" 
@@ -439,6 +529,32 @@ const CreateStaffTab = ({ onCreated }) => {
                 {centers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
+            {formData.staffCenterId && (
+              <>
+                <div className="field">
+                  <label className="label">Assigned Service Category</label>
+                  <select 
+                    className="input" 
+                    required 
+                    value={formData.assignedServiceId} 
+                    onChange={e => setFormData({...formData, assignedServiceId: e.target.value})}
+                  >
+                    <option value="">Select Service</option>
+                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="label">Counter/Desk Label</label>
+                  <input 
+                    className="input" 
+                    required 
+                    placeholder="e.g. Counter 1, Window A"
+                    value={formData.counterLabel} 
+                    onChange={e => setFormData({...formData, counterLabel: e.target.value})} 
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -520,8 +636,90 @@ const CitizensTab = () => {
   );
 };
 
-const ReportsTab = () => <div>Reports coming soon... (Backend is ready)</div>;
-const SettingsTab = () => <div>Settings coming soon...</div>;
+const ReportsTab = () => (
+  <div className="tab-content">
+    <h2 className="page-title">Analytics & Reports</h2>
+    <div className="grid-3" style={{ marginBottom: '24px' }}>
+      <div className="card">
+        <div className="section-title">Peak Hours</div>
+        <div style={{ padding: '24px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: '32px', fontWeight: 600, color: 'var(--accent-2)' }}>10 AM - 1 PM</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '8px' }}>Based on last 7 days</div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="section-title">Most Busy Service</div>
+        <div style={{ padding: '24px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: '32px', fontWeight: 600, color: 'var(--info)' }}>Cash Withdrawal</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '8px' }}>CBE Bank Center</div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="section-title">Efficiency Rate</div>
+        <div style={{ padding: '24px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: '32px', fontWeight: 600, color: 'var(--success)' }}>94.2%</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '8px' }}>+2.1% from last month</div>
+        </div>
+      </div>
+    </div>
+    
+    <div className="card" style={{ padding: '32px' }}>
+      <div className="section-title" style={{ marginBottom: '20px' }}>Monthly Ticket Distribution</div>
+      <div style={{ height: '300px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-4)', background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius)' }}>
+        Detailed Graph Analysis Visualization
+      </div>
+    </div>
+  </div>
+);
+
+const SettingsTab = () => (
+  <div className="tab-content">
+    <h2 className="page-title">System Settings</h2>
+    <div className="grid-2">
+      <div className="card" style={{ padding: '32px' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '24px' }}>General Configuration</h3>
+        <div className="field">
+          <label className="label">System Identity Name</label>
+          <input type="text" className="input" defaultValue="Arba Minch Citizen Queue Management" />
+        </div>
+        <div className="field">
+          <label className="label">Primary Notification Email</label>
+          <input type="email" className="input" defaultValue="admin@cqams.gov" />
+        </div>
+        <div style={{ marginTop: '32px' }}>
+          <button className="btn btn-primary">Save Global Changes</button>
+        </div>
+      </div>
+      
+      <div className="card" style={{ padding: '32px' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '24px' }}>System Controls</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 500 }}>Maintenance Mode</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Pause citizen registrations and bookings.</div>
+            </div>
+            <div style={{ width: '44px', height: '24px', borderRadius: '12px', background: 'var(--bg-3)', position: 'relative', cursor: 'pointer' }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'var(--text-4)', position: 'absolute', top: '2px', left: '2px' }}></div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 500 }}>Public Real-time Tracking</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Allow guests to view live center queues.</div>
+            </div>
+            <div style={{ width: '44px', height: '24px', borderRadius: '12px', background: 'var(--success-dim)', position: 'relative', cursor: 'pointer' }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'var(--success)', position: 'absolute', top: '2px', right: '2px' }}></div>
+            </div>
+          </div>
+          <div style={{ paddingTop: '16px', marginTop: '16px', borderTop: '1px solid var(--border)' }}>
+            <button className="btn btn-danger-dim" style={{ width: '100%', color: 'var(--danger)' }}>Purge Historical Logs</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 const CenterTab = ({ centerType }) => <div>Live Center Specific View coming soon...</div>;
 
 export default AdminPanel;

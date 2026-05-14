@@ -73,9 +73,9 @@ const TrackQueue = () => {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {centers.map(center => (
-            <div key={center._id}>
+            <div key={center.id}>
               <div 
-                onClick={() => setExpandedCenter(expandedCenter === center._id ? null : center._id)}
+                onClick={() => setExpandedCenter(expandedCenter === center.id ? null : center.id)}
                 style={{ 
                   padding: '8px 12px', 
                   borderRadius: 'var(--radius)', 
@@ -83,28 +83,28 @@ const TrackQueue = () => {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  background: expandedCenter === center._id ? 'rgba(255,255,255,.03)' : 'transparent',
+                  background: expandedCenter === center.id ? 'rgba(255,255,255,.03)' : 'transparent',
                   transition: 'all 0.15s ease'
                 }}
               >
                 <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-2)' }}>{center.name}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text-4)', transform: expandedCenter === center._id ? 'rotate(180deg)' : 'none' }}>▼</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-4)', transform: expandedCenter === center.id ? 'rotate(180deg)' : 'none' }}>▼</div>
               </div>
               
-              {expandedCenter === center._id && (
+              {expandedCenter === center.id && (
                 <div style={{ paddingLeft: '12px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                   {center.services.map(service => (
                     <div 
-                      key={service._id}
+                      key={service.id}
                       onClick={() => setSelectedService(service)}
                       style={{ 
                         padding: '6px 12px', 
                         fontSize: '13px', 
                         cursor: 'pointer',
                         borderRadius: 'var(--radius-sm)',
-                        color: selectedService?._id === service._id ? 'var(--accent-2)' : 'var(--text-3)',
-                        fontWeight: selectedService?._id === service._id ? '500' : '400',
-                        background: selectedService?._id === service._id ? 'var(--accent-dim)' : 'transparent'
+                        color: selectedService?.id === service.id ? 'var(--accent-2)' : 'var(--text-3)',
+                        fontWeight: selectedService?.id === service.id ? '500' : '400',
+                        background: selectedService?.id === service.id ? 'var(--accent-dim)' : 'transparent'
                       }}
                     >
                       · {service.name}
@@ -130,7 +130,7 @@ const TrackQueue = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
               <div>
                 <h2 style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-1)' }}>{selectedService.name}</h2>
-                <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>{centers.find(c => c._id === selectedService.center || c._id === selectedService.centerId)?.name}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>{centers.find(c => c.id === selectedService.center || c.id === selectedService.centerId)?.name}</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
                 <div className="live-dot">LIVE</div>
@@ -140,10 +140,10 @@ const TrackQueue = () => {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {queue.length > 0 ? queue.map((ticket, index) => {
-                const isMe = ticket.userId === user.id || ticket.user?._id === user.id;
+                const isMe = ticket.userId === user.id || ticket.user?.id === user.id;
                 return (
                   <div 
-                    key={ticket._id}
+                    key={ticket.id || `ticket-${index}`}
                     className="card"
                     style={{ 
                       padding: '10px 14px', 

@@ -28,8 +28,8 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  const adminLogin = async (username, password) => {
-    const { data } = await api.post('/auth/admin/login', { username, password });
+  const adminLogin = async (email, password) => {
+    const { data } = await api.post('/auth/admin/login', { username: email, password });
     setUser(data);
     return data;
   };

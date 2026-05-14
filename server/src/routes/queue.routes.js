@@ -3,6 +3,7 @@ import {
   takeTicket, 
   getTicketStatus, 
   cancelTicket,
+  getMyTickets,
   getMyServiceQueue,
   callNext,
   serveTicket,
@@ -20,6 +21,7 @@ const router = Router();
 router.use(authenticate);
 router.post('/take', takeTicket);
 router.get('/status/:id', getTicketStatus);
+router.get('/my', getMyTickets);
 router.delete('/:id', cancelTicket);
 
 // Staff routes

@@ -103,7 +103,7 @@ export const adminLogin = async (req, res) => {
           { email: username.toLowerCase() },
           { username: username.toLowerCase() }
         ],
-        role: { in: ['ADMIN', 'STAFF'] }
+        role: { in: ['SUPER_ADMIN', 'ADMIN', 'STAFF'] }
       }
     });
 
@@ -152,20 +152,26 @@ export const logout = (req, res) => {
 };
 
 export const me = async (req, res) => {
+  const token = req.cookies.cqams_token;
+  
+  if (!token) {
+    return res.json(null);
+  }
+
   try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
+      where: { id: decoded.id },
       include: {
         staffCenter: true
       }
     });
     
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.json(null);
     
     const { passwordHash: _, ...userWithoutPassword } = user;
     res.json(userWithoutPassword);
   } catch (error) {
-    console.error('Auth Me Error:', error);
-    res.status(500).json({ error: error.message });
+    res.json(null);
   }
 };

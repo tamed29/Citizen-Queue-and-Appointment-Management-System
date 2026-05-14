@@ -75,7 +75,9 @@ const Navbar = () => {
     <nav style={navStyle}>
       <div style={innerStyle}>
         <div>
-          <Link to={user ? "/home" : "/"} style={logoStyle} onClick={() => setMobileMenuOpen(false)}>CQAMS</Link>
+          <Link to={user ? "/home" : "/"} style={logoStyle} onClick={() => setMobileMenuOpen(false)}>
+            {(!user || user.role === 'CITIZEN' || user.role === 'STAFF') ? 'CQAMS' : ''}
+          </Link>
         </div>
 
         {/* Desktop Menu */}
@@ -108,7 +110,7 @@ const Navbar = () => {
             </>
           )}
 
-          {user?.role === 'ADMIN' && (
+          {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
             <>
               <Link to="/admin" style={linkStyle('/admin')}>Admin</Link>
               <Link to="/staff" style={linkStyle('/staff')}>Staff View</Link>
@@ -149,7 +151,7 @@ const Navbar = () => {
             {user.role === 'STAFF' && (
               <Link to="/staff" style={mobileLinkStyle('/staff')} onClick={() => setMobileMenuOpen(false)}>Staff Dashboard</Link>
             )}
-            {user.role === 'ADMIN' && (
+            {(user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') && (
               <>
                 <Link to="/admin" style={mobileLinkStyle('/admin')} onClick={() => setMobileMenuOpen(false)}>Admin Panel</Link>
                 <Link to="/staff" style={mobileLinkStyle('/staff')} onClick={() => setMobileMenuOpen(false)}>Staff Portal</Link>

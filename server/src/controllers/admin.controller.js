@@ -169,17 +169,23 @@ export const togglePriority = async (req, res) => {
 
 // Staff Management
 export const createStaffAccount = async (req, res) => {
-  const { name, phone, email, password, staffCenterId } = req.body;
+  const { name, phone, email, password, staffCenterId, assignedServiceId, counterLabel, role } = req.body;
 
-  if (!name || !phone || !password || !staffCenterId || !email) {
-    return res.status(400).json({ error: 'All fields are required (Name, Phone, Email, Password, Center)' });
+  const targetRole = role === 'ADMIN' ? 'ADMIN' : 'STAFF';
+
+  if (!name || !phone || !password || !email) {
+    return res.status(400).json({ error: 'All fields are required' });
+  }
+  
+  if (targetRole === 'STAFF' || targetRole === 'ADMIN') {
+    if (!staffCenterId) {
+      return res.status(400).json({ error: 'Please select a service center for this administrator.' });
+    }
   }
 
   try {
     const existing = await prisma.user.findUnique({ where: { phone } });
     if (existing) return res.status(409).json({ error: 'Phone number already taken' });
-
-    if (!email) return res.status(400).json({ error: 'Email is required for staff accounts' });
 
     const passwordHash = await bcrypt.hash(password, 10);
     const shortCode = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '.');
@@ -191,13 +197,15 @@ export const createStaffAccount = async (req, res) => {
         phone,
         email: email.toLowerCase(),
         passwordHash,
-        role: 'STAFF',
+        role: targetRole,
         staffCenterId,
+        assignedServiceId,
+        counterLabel,
         isActive: true
       },
       select: {
         id: true, username: true, name: true, phone: true, email: true, role: true, 
-        staffCenterId: true, isActive: true
+        staffCenterId: true, assignedServiceId: true, counterLabel: true, isActive: true
       }
     });
 
@@ -210,7 +218,7 @@ export const createStaffAccount = async (req, res) => {
 export const getAllStaff = async (req, res) => {
   try {
     const staff = await prisma.user.findMany({
-      where: { role: 'STAFF' },
+      where: { role: { in: ['STAFF', 'ADMIN'] } },
       include: {
         staffCenter: { select: { name: true, type: true } },
       },

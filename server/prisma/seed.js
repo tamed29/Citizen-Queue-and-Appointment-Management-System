@@ -85,14 +85,15 @@ async function main() {
   }
 
   // 2. Create Users
-  // System Admin - with USERNAME 'admin'
+  // Master Super Admin
   await prisma.user.create({
     data: {
       username: 'admin',
       name: 'System Admin',
+      email: 'admin@cqams.gov',
       phone: '0911000001',
-      passwordHash,
-      role: 'ADMIN',
+      passwordHash: await bcrypt.hash('admin123', 10),
+      role: 'SUPER_ADMIN',
     },
   });
 
@@ -186,8 +187,8 @@ async function main() {
 
   console.log('✅ Seed completed successfully');
   console.log('---------------------------------');
-  console.log('ADMIN LOGIN (System Admin):');
-  console.log('  Username: admin  Password: admin123');
+  console.log('SUPER ADMIN LOGIN:');
+  console.log('  Email: admin@cqams.gov  Password: admin123');
   console.log('---------------------------------');
   console.log('STAFF LOGINS (Username / Password):');
   console.log('  Chala Bekele   → cbe.chala / staff123');

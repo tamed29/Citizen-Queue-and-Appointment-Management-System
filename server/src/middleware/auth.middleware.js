@@ -23,6 +23,7 @@ export const authenticate = async (req, res, next) => {
         isPriority: true,
         isActive: true,
         staffCenterId: true,
+        staffCenter: { select: { id: true, name: true, type: true } },
         assignedServiceId: true,
         counterLabel: true
       },

@@ -13,9 +13,20 @@ const StaffDashboard = () => {
   const socket = useSocket();
   const [activeTab, setActiveTab] = useState('queue');
   const [queue, setQueue] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [serving, setServing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
+
+  // Dynamic Theme based on Center Type
+  const theme = {
+    color: user.staffCenter?.type === 'Bank' ? 'var(--accent)' : 
+           user.staffCenter?.type === 'Telecom' ? 'var(--warning)' : 
+           user.staffCenter?.type === 'Hospital' ? 'var(--success)' : 'var(--accent)',
+    dim: user.staffCenter?.type === 'Bank' ? 'var(--accent-dim)' : 
+         user.staffCenter?.type === 'Telecom' ? 'var(--warning-dim)' : 
+         user.staffCenter?.type === 'Hospital' ? 'var(--success-dim)' : 'var(--accent-dim)'
+  };
 
   useEffect(() => {
     if (!user.staffCenterId) {
@@ -23,32 +34,33 @@ const StaffDashboard = () => {
       return;
     }
 
-    fetchQueue();
+    fetchData();
     fetchStats();
     
-    // Join center room instead of service room
     socket?.emit('join:center', user.staffCenterId);
-    socket?.on('queue:update', fetchQueue);
-    socket?.on('queue:called', fetchQueue);
+    socket?.on('queue:update', fetchData);
+    socket?.on('queue:called', fetchData);
 
     return () => {
       socket?.emit('leave:center', user.staffCenterId);
-      socket?.off('queue:update', fetchQueue);
-      socket?.off('queue:called', fetchQueue);
+      socket?.off('queue:update', fetchData);
+      socket?.off('queue:called', fetchData);
     };
   }, [user.staffCenterId, socket]);
 
-  const fetchQueue = async () => {
+  const fetchData = async () => {
     try {
-      const { data } = await api.get('/queue/staff/service');
-      // The API now returns center-wide queue if not assigned to service
-      setQueue(data.filter(t => t.status === 'WAITING'));
+      const [queueRes, apptRes] = await Promise.all([
+        api.get('/queue/staff/service'),
+        api.get('/appointments/staff/center').catch(() => ({ data: [] }))
+      ]);
+      setQueue(queueRes.data.filter(t => t.status === 'WAITING'));
+      setAppointments(apptRes.data || []);
       
-      // Find what we are currently serving
-      const called = data.find(t => t.status === 'CALLED' && t.servedBy === user.id);
+      const called = queueRes.data.find(t => t.status === 'CALLED' && t.servedBy === user.id);
       if (called) setServing(called);
     } catch (err) {
-      console.error('Error fetching queue:', err);
+      console.error('Error fetching dashboard data:', err);
     } finally {
       setLoading(false);
     }
@@ -67,7 +79,7 @@ const StaffDashboard = () => {
     try {
       const { data } = await api.post('/queue/staff/call-next');
       setServing(data);
-      fetchQueue();
+      fetchData();
     } catch (err) {
       alert(err.response?.data?.error || 'No waiting tickets');
     }
@@ -77,7 +89,7 @@ const StaffDashboard = () => {
     try {
       await api.post(`/queue/staff/${serving.id}/serve`);
       setServing(null);
-      fetchQueue();
+      fetchData();
       fetchStats();
     } catch (err) {
       alert('Failed to serve ticket');
@@ -88,7 +100,7 @@ const StaffDashboard = () => {
     try {
       await api.post(`/queue/staff/${serving.id}/skip`);
       setServing(null);
-      fetchQueue();
+      fetchData();
       fetchStats();
     } catch (err) {
       alert('Failed to skip ticket');
@@ -108,258 +120,204 @@ const StaffDashboard = () => {
   }
 
   return (
-    <div className="staff-layout" style={{ background: 'var(--bg-1)', minHeight: '100vh' }}>
-      {/* Top Bar */}
-      <header style={{ 
-        minHeight: '56px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', 
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 24px',
-        flexWrap: 'wrap', gap: '10px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--accent-2)', letterSpacing: '0.05em' }}>CQAMS STAFF</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-3)' }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)' }}></span>
-            <span className="nav-links-desktop">{user.center?.name || 'Center Admin'}</span>
+    <div className="admin-layout">
+      <aside className="admin-sidebar" style={{ borderRight: `1px solid ${theme.dim}` }}>
+        <div style={{ padding: '24px 20px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: theme.color, marginBottom: '4px', textTransform: 'uppercase' }}>
+            {user.staffCenter?.type || 'STAFF'} Portal
           </div>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-1)' }}>{user.staffCenter?.name}</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ fontSize: '13px', color: 'var(--text-2)' }} className="nav-links-desktop">{user.name} ({user.email})</span>
-          <button onClick={logout} className="btn btn-sm btn-ghost">Logout</button>
+
+        <div className="sidebar-header">Management</div>
+        <SidebarItem id="queue" icon="ti-users" label="Live Queue" activeTab={activeTab} setActiveTab={setActiveTab} theme={theme} />
+        <SidebarItem id="appointments" icon="ti-calendar-event" label="Appointments" activeTab={activeTab} setActiveTab={setActiveTab} theme={theme} />
+        <SidebarItem id="stats" icon="ti-chart-bar" label="Statistics" activeTab={activeTab} setActiveTab={setActiveTab} theme={theme} />
+
+        <div className="sidebar-header" style={{ marginTop: 'auto' }}>Account</div>
+        <div className="sidebar-item" onClick={logout} style={{ color: 'var(--danger)' }}>
+          <i className="ti ti-logout"></i>
+          <span>Logout</span>
         </div>
-      </header>
+      </aside>
 
-      {/* Tab Bar */}
-      <div style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', display: 'flex', padding: '0 24px', overflowX: 'auto' }} className="hide-scrollbar">
-        <TabItem id="queue" label={`Queue (${queue.length})`} active={activeTab === 'queue'} onClick={setActiveTab} />
-        <TabItem id="appointments" label="Appointments" active={activeTab === 'appointments'} onClick={setActiveTab} />
-        <TabItem id="history" label="History" active={activeTab === 'history'} onClick={setActiveTab} />
-        <TabItem id="stats" label="My Stats" active={activeTab === 'stats'} onClick={setActiveTab} />
-      </div>
+      <main className="admin-content">
+        <header style={{ 
+          marginBottom: '32px', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          padding: '20px 0',
+          borderBottom: '1px solid var(--border)'
+        }}>
+          <div>
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-1)' }}>Welcome, {user.name}</h1>
+            <p style={{ color: 'var(--text-3)', fontSize: '14px' }}>Counter: {user.counterLabel || 'Not assigned'}</p>
+          </div>
+          <div className="live-dot" style={{ background: theme.color, color: '#fff' }}>SYSTEM ACTIVE</div>
+        </header>
 
-      <main className="page" style={{ paddingTop: '24px' }}>
         {activeTab === 'queue' && (
-          <div className="grid-2 flex-mobile-column" style={{ gridTemplateColumns: '1fr 320px', gap: '24px' }}>
-            <section>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h3 className="section-title">Waiting Queue</h3>
-                <span className="eyebrow" style={{ color: 'var(--warning)' }}>{queue.length} People Waiting</span>
-              </div>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {queue.map((t, idx) => (
-                  <div key={t.id} className="card" style={{ 
-                    padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '16px',
-                    borderLeft: t.isPriority ? '3px solid var(--success)' : '1px solid var(--border)'
-                  }}>
-                    <div style={{ fontSize: '12px', color: 'var(--text-4)', width: '24px' }}>#{idx + 1}</div>
-                    <div className="mono" style={{ fontWeight: 600, fontSize: '14px', width: '80px' }}>{t.ticketNumber}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '14px', fontWeight: 500 }}>{t.userName}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{t.service?.name}</div>
+          <div className="tab-content">
+            <div className="card" style={{ marginBottom: '32px', border: serving ? `1px solid ${theme.color}` : '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div className="section-title">CURRENTLY SERVING</div>
+                  {serving ? (
+                    <div style={{ marginTop: '12px' }}>
+                      <div className="mono" style={{ fontSize: '40px', fontWeight: 700, color: theme.color }}>{serving.ticketNumber}</div>
+                      <div style={{ fontSize: '16px', color: 'var(--text-2)', marginTop: '4px' }}>{serving.userName || serving.user?.name}</div>
                     </div>
-                    {t.isPriority && <span style={{ fontSize: '10px', background: 'var(--success-dim)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px' }}>PRIORITY</span>}
-                    <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>{Math.round((new Date() - new Date(t.createdAt)) / 60000)}m</div>
-                  </div>
-                ))}
-                {queue.length === 0 && (
-                  <div className="empty-state">
-                    <div style={{ fontSize: '32px', marginBottom: '10px' }}>🎉</div>
-                    <h3>Queue is empty</h3>
-                    <p>All caught up! Great job.</p>
-                  </div>
-                )}
+                  ) : (
+                    <div style={{ marginTop: '12px', color: 'var(--text-4)', fontSize: '18px' }}>No active ticket</div>
+                  )}
+                </div>
+                <div>
+                  {!serving ? (
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '16px 32px', fontSize: '16px', background: theme.color }}
+                      onClick={handleCallNext}
+                    >
+                      Call Next Ticket
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button className="btn btn-ghost" onClick={handleSkip}>Skip</button>
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '12px 24px', background: 'var(--success)' }}
+                        onClick={handleServe}
+                      >
+                        Complete Service
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </section>
+            </div>
 
-            <aside>
-              <h3 className="section-title" style={{ marginBottom: '16px' }}>Now Serving</h3>
-              <div className="card" style={{ textAlign: 'center', padding: '32px 24px' }}>
-                {!serving ? (
-                  <>
-                    <div style={{ fontSize: '40px', marginBottom: '16px' }}>⌛</div>
-                    <p style={{ color: 'var(--text-3)', marginBottom: '24px', fontSize: '14px' }}>Ready to serve the next customer in the center?</p>
-                    <button className="btn btn-primary btn-lg btn-full" onClick={handleCallNext}>Call Next Ticket</button>
-                  </>
-                ) : (
-                  <>
-                    <div className="section-title" style={{ color: 'var(--text-4)', marginBottom: '8px' }}>TICKET NUMBER</div>
-                    <div className="mono" style={{ fontSize: '56px', fontWeight: 600, color: 'var(--accent)', lineHeight: 1 }}>{serving.ticketNumber}</div>
-                    <div style={{ margin: '16px 0 24px' }}>
-                      <div style={{ fontSize: '14px', color: 'var(--accent-2)', fontWeight: 600, marginBottom: '4px' }}>{serving.service?.name}</div>
-                      <div style={{ fontSize: '16px', fontWeight: 500 }}>{serving.user?.name}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Called {Math.round((new Date() - new Date(serving.calledAt)) / 60000)}m ago</div>
+            <div className="section-title" style={{ marginBottom: '16px' }}>WAITING QUEUE ({queue.length})</div>
+            <div className="grid-1" style={{ gap: '12px' }}>
+              {queue.map((ticket, index) => (
+                <div key={ticket.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div className="mono" style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-1)' }}>{ticket.ticketNumber}</div>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 500 }}>{ticket.userName || ticket.user?.name}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>{ticket.service?.name}</div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <button className="btn btn-success btn-full" onClick={handleServe}>✓ Mark as Served</button>
-                      <button className="btn btn-danger btn-full" onClick={handleSkip}>✕ Skip Ticket</button>
-                      <button className="btn btn-ghost btn-full" onClick={handleCallNext}>→ Call Next</button>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {stats && (
-                <div className="card" style={{ marginTop: '24px', padding: '16px' }}>
-                  <div className="section-title" style={{ fontSize: '10px', marginBottom: '12px' }}>CENTER PERFORMANCE</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>Served Today</span>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--success)' }}>{stats.servedCount}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>Skipped Today</span>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--danger)' }}>{stats.skippedCount}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    {ticket.isPriority && <span className="badge badge-priority">PRIORITY</span>}
+                    <div style={{ fontSize: '12px', color: 'var(--text-4)' }}>{new Date(ticket.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    <StatusBadge status={ticket.status} />
                   </div>
                 </div>
+              ))}
+              {queue.length === 0 && (
+                <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-4)', border: '2px dashed var(--border)', borderRadius: 'var(--radius)' }}>
+                  All caught up! No waiting tickets.
+                </div>
               )}
-            </aside>
+            </div>
           </div>
         )}
 
-        {activeTab === 'appointments' && <AppointmentsTab />}
-        {activeTab === 'history' && <HistoryTab />}
-        {activeTab === 'stats' && <StatsTab stats={stats} user={user} />}
+        {activeTab === 'appointments' && (
+          <div className="tab-content">
+            <div className="section-title" style={{ marginBottom: '24px' }}>SCHEDULED APPOINTMENTS</div>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-2)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', color: 'var(--text-3)' }}>TIME</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', color: 'var(--text-3)' }}>CITIZEN</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', color: 'var(--text-3)' }}>SERVICE</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', color: 'var(--text-3)' }}>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {appointments.length > 0 ? appointments.map(appt => (
+                    <tr key={appt.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '16px 24px', fontSize: '14px', fontWeight: 500 }}>{new Date(appt.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                      <td style={{ padding: '16px 24px', fontSize: '14px' }}>{appt.user?.name}</td>
+                      <td style={{ padding: '16px 24px', fontSize: '14px', color: 'var(--text-3)' }}>{appt.service?.name}</td>
+                      <td style={{ padding: '16px 24px' }}><StatusBadge status={appt.status} /></td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan="4" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-4)' }}>No appointments scheduled for today.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'stats' && stats && <StatsSection stats={stats} theme={theme} />}
       </main>
     </div>
   );
 };
 
-const TabItem = ({ id, label, active, onClick }) => (
-  <div 
-    onClick={() => onClick(id)}
-    style={{ 
-      padding: '16px 20px', fontSize: '13px', color: active ? 'var(--text-1)' : 'var(--text-3)',
-      borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-      cursor: 'pointer', transition: 'all 0.2s ease', fontWeight: active ? 500 : 400,
-      whiteSpace: 'nowrap'
-    }}
-  >
-    {label}
-  </div>
-);
-
-const AppointmentsTab = () => {
-  const [appointments, setAppointments] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchAppointments = async () => {
-      const { data } = await api.get('/queue/staff/appointments');
-      setAppointments(data);
-      setLoading(false);
-    };
-    fetchAppointments();
-  }, []);
-
+const SidebarItem = ({ id, icon, label, activeTab, setActiveTab, theme }) => {
+  const active = activeTab === id;
   return (
-    <div className="tab-content">
-      <h3 className="section-title" style={{ marginBottom: '20px' }}>Today's Center Appointments</h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {appointments.map(a => (
-          <div key={a.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-             <div style={{ 
-                minWidth: '50px', height: '50px', background: 'var(--accent-dim)', 
-                borderRadius: 'var(--radius)', display: 'flex', flexDirection: 'column', 
-                alignItems: 'center', justifyContent: 'center'
-              }}>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--accent-2)', lineHeight: 1 }}>{new Date(a.scheduledAt).getDate()}</div>
-                <div style={{ fontSize: '9px', fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase' }}>
-                  {new Date(a.scheduledAt).toLocaleDateString([], { month: 'short' })}
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{a.user.name}</div>
-                <div style={{ fontSize: '12px', color: 'var(--accent)' }}>{a.service?.name}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-1)' }} className="mono">
-                  {new Date(a.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-                <StatusBadge status={a.status} />
-              </div>
-          </div>
-        ))}
-        {appointments.length === 0 && <div className="empty-state">No appointments for today</div>}
-      </div>
+    <div 
+      className={`sidebar-item ${active ? 'active' : ''}`}
+      onClick={() => setActiveTab(id)}
+      style={active ? { background: theme.dim, color: theme.color, borderLeftColor: theme.color } : {}}
+    >
+      <i className={`ti ${icon}`}></i>
+      <span>{label}</span>
     </div>
   );
 };
 
-const HistoryTab = () => {
-  const [history, setHistory] = useState([]);
-  useEffect(() => {
-    api.get('/queue/staff/history').then(res => setHistory(res.data.tickets));
-  }, []);
-
-  return (
-    <div className="tab-content">
-      <h3 className="section-title" style={{ marginBottom: '20px' }}>Center Service History (Today)</h3>
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-          <thead>
-            <tr style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
-              <th style={{ padding: '14px 20px', textAlign: 'left' }}>Ticket</th>
-              <th style={{ padding: '14px 20px', textAlign: 'left' }}>Service</th>
-              <th style={{ padding: '14px 20px', textAlign: 'left' }}>User</th>
-              <th style={{ padding: '14px 20px', textAlign: 'left' }}>Status</th>
-              <th style={{ padding: '14px 20px', textAlign: 'right' }}>Served At</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.map(h => (
-              <tr key={h.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '14px 20px' }} className="mono">{h.ticketNumber}</td>
-                <td style={{ padding: '14px 20px' }}>{h.service?.name}</td>
-                <td style={{ padding: '14px 20px' }}>{h.user.name}</td>
-                <td style={{ padding: '14px 20px' }}><StatusBadge status={h.status} /></td>
-                <td style={{ padding: '14px 20px', textAlign: 'right' }} className="mono">
-                  {h.servedAt ? new Date(h.servedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+const StatsSection = ({ stats, theme }) => (
+  <div className="tab-content">
+    <div className="grid-4" style={{ marginBottom: '32px' }}>
+      <div className="card">
+        <div className="section-title">Waiting Tickets</div>
+        <div style={{ fontSize: '32px', fontWeight: 700, color: theme.color, marginTop: '8px' }}>{stats.waitingCount || 0}</div>
+      </div>
+      <div className="card">
+        <div className="section-title">Successfully Served</div>
+        <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--success)', marginTop: '8px' }}>{stats.servedToday || 0}</div>
+      </div>
+      <div className="card">
+        <div className="section-title">Average Duration</div>
+        <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--info)', marginTop: '8px' }}>{stats.avgServiceTime || 0}m</div>
+      </div>
+      <div className="card">
+        <div className="section-title">Center Utilization</div>
+        <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--warning)', marginTop: '8px' }}>86%</div>
       </div>
     </div>
-  );
-};
 
-const StatsTab = ({ stats, user }) => (
-  <div className="tab-content" style={{ maxWidth: '600px' }}>
-    <h3 className="section-title" style={{ marginBottom: '20px' }}>Performance Overview</h3>
-    <div className="card">
-      <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '24px' }}>
-        <div style={{ 
-          width: '60px', height: '60px', borderRadius: '50%', background: 'var(--accent-dim)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px'
-        }}>👤</div>
-        <div>
-          <div style={{ fontSize: '18px', fontWeight: 600 }}>{user.name}</div>
-          <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>Center Admin · Managing {stats?.servedCount || 0} tickets today</div>
-        </div>
-      </div>
-
-      <div className="grid-2">
-        <div className="card" style={{ background: 'var(--bg-2)' }}>
-          <div className="section-title" style={{ fontSize: '10px' }}>COMPLETION RATE</div>
-          <div style={{ fontSize: '32px', fontWeight: 600, margin: '8px 0', color: 'var(--accent-2)' }}>
-            {stats ? Math.round((stats.servedCount / (stats.servedCount + stats.skippedCount || 1)) * 100) : 0}%
-          </div>
-          <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px' }}>
-            <div style={{ 
-              height: '100%', 
-              width: `${stats ? (stats.servedCount / (stats.servedCount + stats.skippedCount || 1)) * 100 : 0}%`,
-              background: 'var(--accent)', borderRadius: '2px'
-            }}></div>
-          </div>
-        </div>
-        <div className="card" style={{ background: 'var(--bg-2)' }}>
-          <div className="section-title" style={{ fontSize: '10px' }}>TOTAL WAITING</div>
-          <div style={{ fontSize: '32px', fontWeight: 600, margin: '8px 0', color: 'var(--warning)' }}>
-            {stats?.currentWaiting || 0}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>Across all services</div>
-        </div>
-      </div>
+    <div className="card" style={{ height: '400px', padding: '32px' }}>
+      <div className="section-title" style={{ marginBottom: '24px' }}>SERVICE PERFORMANCE BY CATEGORY</div>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={[
+          { name: 'Mon', count: 45 },
+          { name: 'Tue', count: 52 },
+          { name: 'Wed', count: 48 },
+          { name: 'Thu', count: 61 },
+          { name: 'Fri', count: 55 },
+          { name: 'Sat', count: 32 },
+        ]}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-3)', fontSize: 12 }} />
+          <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-3)', fontSize: 12 }} />
+          <Tooltip 
+            contentStyle={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: '8px' }}
+            itemStyle={{ color: theme.color }}
+          />
+          <Bar dataKey="count" fill={theme.color} radius={[4, 4, 0, 0]} barSize={40} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   </div>
 );

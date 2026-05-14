@@ -78,7 +78,7 @@ const QueueTicketCard = ({ ticket, onCancel }) => {
         <StatusBadge status={status} />
         {onCancel && status === 'WAITING' && (
           <button 
-            onClick={() => onCancel(ticket._id || ticket.id)}
+            onClick={() => onCancel(ticket.id)}
             className="btn btn-danger btn-sm"
           >
             Cancel

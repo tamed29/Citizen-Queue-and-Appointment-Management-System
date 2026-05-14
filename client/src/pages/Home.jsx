@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -10,6 +10,10 @@ const Home = () => {
   const [stats, setStats] = useState(null);
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  if (user && (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN')) {
+    return <Navigate to="/admin" replace />;
+  }
 
   useEffect(() => {
     const fetchData = async () => {
@@ -27,7 +31,7 @@ const Home = () => {
       }
     };
     fetchData();
-  }, [user.role]);
+  }, [user?.role]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -102,28 +106,28 @@ const Home = () => {
             <ActionCard 
               title="Take a Queue" 
               desc="Get a virtual ticket for any service center." 
-              icon="🎫" 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.7.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4"/><path d="M2 9h20"/></svg>} 
               to="/queue/take" 
               actionText="Take Ticket"
             />
             <ActionCard 
               title="Book Appointment" 
               desc="Schedule a visit for a specific date and time." 
-              icon="📅" 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>} 
               to="/appointments" 
               actionText="Book Now"
             />
             <ActionCard 
               title="Track Live Queue" 
               desc="See real-time status and your current position." 
-              icon="⚡" 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>} 
               to="/queue/track" 
               actionText="Track Live"
             />
             <ActionCard 
               title="My Tickets" 
               desc="View your history and active queue tickets." 
-              icon="📋" 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>} 
               to="/tickets" 
               actionText="View All"
             />
@@ -135,16 +139,49 @@ const Home = () => {
             <ActionCard 
               title="Staff Dashboard" 
               desc="Manage your counter and call customers." 
-              icon="🖥️" 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y2="21" x2="16" y1="21"/><line x1="12" y2="17" x2="12" y1="21"/></svg>} 
               to="/staff" 
               actionText="Open Dashboard"
             />
             <ActionCard 
               title="Track Live Queue" 
               desc="Monitor real-time queue status." 
-              icon="⚡" 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>} 
               to="/queue/track" 
               actionText="Track Live"
+            />
+          </div>
+        )}
+
+        {user.role === 'SUPER_ADMIN' && (
+          <div className="grid-4" style={{ marginBottom: '32px' }}>
+            <ActionCard 
+              title="Super Admin Panel" 
+              desc="Full control over users, centers, and system." 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>} 
+              to="/admin" 
+              actionText="Manage System"
+            />
+            <ActionCard 
+              title="Staff Dashboard" 
+              desc="Monitor counters and call customers." 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y2="21" x2="16" y1="21"/><line x1="12" y2="17" x2="12" y1="21"/></svg>} 
+              to="/staff" 
+              actionText="Open Dashboard"
+            />
+            <ActionCard 
+              title="Track Live Queue" 
+              desc="Monitor real-time queue status." 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>} 
+              to="/queue/track" 
+              actionText="Track Live"
+            />
+             <ActionCard 
+              title="Citizens" 
+              desc="Manage citizen accounts and priority." 
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>} 
+              to="/admin" 
+              actionText="Manage"
             />
           </div>
         )}
@@ -196,7 +233,7 @@ const Home = () => {
           {tickets.length > 0 ? (
             <div>
               {tickets.map(ticket => (
-                <QueueTicketCard key={ticket._id} ticket={ticket} />
+                <QueueTicketCard key={ticket.id} ticket={ticket} />
               ))}
             </div>
           ) : (
